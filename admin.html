@@ -146,6 +146,7 @@ const TYPES = {
 };
 
 let activeType = 'news';
+let editingIndex = null; // nullなら新規登録モード、数値なら編集モード（そのインデックスの項目を編集中）
 
 function storageKeyFor(type){
   if (type === 'news') return STORAGE_KEYS.news;
@@ -177,7 +178,7 @@ function renderTabBar(){
     `<button class="tab-btn ${activeType===key?'active':''}" data-type="${key}">${TYPES[key].label}</button>`
   ).join('');
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { activeType = btn.dataset.type; renderTabBar(); renderTabContent(); });
+    btn.addEventListener('click', () => { activeType = btn.dataset.type; editingIndex = null; renderTabBar(); renderTabContent(); });
   });
 }
 
@@ -205,13 +206,18 @@ function fieldHtml(f){
 function renderTabContent(){
   const type = TYPES[activeType];
   const items = loadItems(activeType);
+  const isEditing = editingIndex !== null && items[editingIndex];
+  const editingItem = isEditing ? items[editingIndex] : null;
 
   const formHtml = `
     <div class="panel">
-      <h2>新規登録：${type.label}</h2>
-      <p class="hint">Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。</p>
+      <h2>${isEditing ? `編集：${type.label}` : `新規登録：${type.label}`}</h2>
+      <p class="hint">${isEditing ? '内容を修正して「保存する」を押してください。' : 'Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。'}</p>
       <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}</div>
-      <button class="submit-btn" id="submitBtn">登録する</button>
+      <div style="display:flex; gap:8px;">
+        <button class="submit-btn" id="submitBtn">${isEditing ? '保存する' : '登録する'}</button>
+        ${isEditing ? '<button class="submit-btn" id="cancelEditBtn" style="background:var(--text-faint);">キャンセル</button>' : ''}
+      </div>
     </div>
   `;
 
@@ -231,7 +237,10 @@ function renderTabContent(){
         if (col === 'views' || col === 'viewers') return `<td>${(item[col] || 0).toLocaleString()}</td>`;
         return `<td>${item[col] ?? ''}</td>`;
       }).join('')}
-      <td><button class="del-btn" data-idx="${idx}">削除</button></td>
+      <td style="white-space:nowrap;">
+        <button class="del-btn" data-edit-idx="${idx}" style="color:var(--accent); border-color:var(--accent); margin-right:4px;">編集</button>
+        <button class="del-btn" data-idx="${idx}">削除</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -252,15 +261,23 @@ function renderTabContent(){
 
   document.getElementById('tabContent').innerHTML = formHtml + tableHtml;
 
+  // 編集モードの場合、フォームに既存の値を入れておく
+  if (isEditing) {
+    document.querySelectorAll('#formGrid [data-field]').forEach(el => {
+      const key = el.dataset.field;
+      if (editingItem[key] !== undefined) el.value = editingItem[key];
+    });
+  }
+
   document.getElementById('submitBtn').addEventListener('click', () => {
-    const newItem = { publishedAt: new Date().toISOString() };
     const requiredKey = type.requiredKey || 'title';
+    const formValues = {};
     let hasRequired = false;
     document.querySelectorAll('#formGrid [data-field]').forEach(el => {
       const key = el.dataset.field;
       let val = el.value;
       if (el.type === 'number') val = Number(val) || 0;
-      newItem[key] = val;
+      formValues[key] = val;
       if (key === requiredKey && String(val).trim()) hasRequired = true;
     });
     if (!hasRequired) {
@@ -270,15 +287,37 @@ function renderTabContent(){
     }
 
     const current = loadItems(activeType);
-    current.unshift(newItem); // 新しいものを先頭に
-    saveItems(activeType, current);
-    showToast('登録しました');
+    if (isEditing) {
+      // 登録日時(publishedAt)は変更せず、それ以外の項目だけ上書きする
+      current[editingIndex] = { ...current[editingIndex], ...formValues };
+      saveItems(activeType, current);
+      showToast('保存しました');
+      editingIndex = null;
+    } else {
+      current.unshift({ publishedAt: new Date().toISOString(), ...formValues }); // 新しいものを先頭に
+      saveItems(activeType, current);
+      showToast('登録しました');
+    }
     renderTabContent();
   });
 
-  document.querySelectorAll('.del-btn').forEach(btn => {
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => { editingIndex = null; renderTabContent(); });
+  }
+
+  document.querySelectorAll('.del-btn[data-edit-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      editingIndex = Number(btn.dataset.editIdx);
+      renderTabContent();
+      document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+
+  document.querySelectorAll('.del-btn[data-idx]').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = Number(btn.dataset.idx);
+      if (editingIndex === idx) editingIndex = null;
       const current = loadItems(activeType);
       current.splice(idx, 1);
       saveItems(activeType, current);

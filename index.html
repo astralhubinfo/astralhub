@@ -277,7 +277,7 @@
     <div class="panel" id="news-section">
       <div class="panel-head">
         <span class="panel-title">最新ニュース</span>
-        <span class="panel-more">もっと見る ›</span>
+        <a class="panel-more" href="list.html?type=news">もっと見る ›</a>
       </div>
       <div class="news-list" id="sidebarNews"></div>
     </div>
@@ -305,93 +305,25 @@
 </div>
 
 <script src="assets/config.js"></script>
+<script src="assets/site-data.js"></script>
 <script>
 /* =========================================================
    1. マスターデータ
    - GAMES / CATEGORY_LABEL は assets/config.js から読み込み
-   - ニュース・配信・動画は「管理画面(admin.html)で登録したデータ」があればそれを使い、
-     何も登録されていない場合はサンプル（ダミー）データを表示する
+   - サンプルデータ・localStorageからの読み込み・カード描画は assets/site-data.js が担当
    ========================================================= */
 const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CONFIG;
-
-// ※以下はすべてサンプル（ダミー）データです。管理画面でデータを登録すると自動的にこちらは表示されなくなります。
-const SAMPLE_NEWS = [
-  { game:'genshin', cat:'character',   title:'[サンプル] 新キャラクター「ドゥリン」公開', minutesAgo: 2 },
-  { game:'hsr',     cat:'version',     title:'[サンプル] Ver.2.3「さよなら、ピノコニー」予告', minutesAgo: 15 },
-  { game:'zzz',     cat:'stream',      title:'[サンプル] Ver.1.5 予告番組まとめ', minutesAgo: 60 },
-  { game:'ww',      cat:'version',     title:'[サンプル] Ver.2.0「静寂の黎明」紹介', minutesAgo: 120 },
-  { game:'nte',     cat:'event',       title:'[サンプル] クローズドβテスト募集開始', minutesAgo: 180 },
-  { game:'genshin', cat:'maintenance', title:'[サンプル] 臨時メンテナンスのお知らせ', minutesAgo: 240 },
-];
-const SAMPLE_LIVE = [
-  { game:'genshin', title:'[サンプル] Ver.6.2 予告番組視聴枠', channel:'原神公式', viewers: 12345 },
-  { game:'hsr',     title:'[サンプル] 開拓ラジオ 特別放送', channel:'崩壊：スターレイル公式', viewers: 8705 },
-  { game:'zzz',     title:'[サンプル] 新エリー都へようこそ！', channel:'ZZZ公式', viewers: 6549 },
-  { game:'ww',      title:'[サンプル] Ver.2.0 特別通信', channel:'鳴潮公式', viewers: 3210 },
-  { game:'nte',     title:'[サンプル] 探索テスト 配信中！', channel:'NTE公式', viewers: 2111 },
-];
-const SAMPLE_VIDEOS = [
-  { game:'genshin', title:'[サンプル] Ver.6.2で絶対やるべきこと5選', channel:'原神公式', views: 287000, duration:'5:24', minutesAgo: 40 },
-  { game:'hsr',     title:'[サンプル] 2.3速報！新キャラの性能解説', channel:'スターレイル攻略ch', views: 213000, duration:'3:40', minutesAgo: 90 },
-  { game:'zzz',     title:'[サンプル] 新キャラ性能解説｜おすすめ編成', channel:'ZZZ攻略部', views: 189000, duration:'6:18', minutesAgo: 130 },
-  { game:'ww',      title:'[サンプル] キャラ完全解説｜おすすめ武器・編成', channel:'鳴潮研究所', views: 124000, duration:'4:57', minutesAgo: 220 },
-  { game:'nte',     title:'[サンプル] NTEの世界を10分で紹介', channel:'NTE公式', views: 98000, duration:'3:33', minutesAgo: 300 },
-];
-
-// サンプルの minutesAgo を、実データと同じ「絶対時刻(publishedAt)」形式に変換しておく
-function sampleToTimestamped(list){
-  const now = Date.now();
-  return list.map(item => {
-    const minutesAgo = typeof item.minutesAgo === 'number' ? item.minutesAgo : 0;
-    return { ...item, publishedAt: new Date(now - minutesAgo * 60000).toISOString() };
-  });
-}
-
-function loadList(storageKey, sample){
-  try {
-    const raw = localStorage.getItem(storageKey);
-    const arr = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(arr) && arr.length > 0) return arr;
-  } catch (e) { /* 保存データが壊れている場合はサンプルにフォールバック */ }
-  return sampleToTimestamped(sample);
-}
-
-const NEWS = loadList(STORAGE_KEYS.news, SAMPLE_NEWS);
-const LIVE_NOW = loadList(STORAGE_KEYS.live, SAMPLE_LIVE);
-const VIDEOS = loadList(STORAGE_KEYS.videos, SAMPLE_VIDEOS);
-
-// チャンネル管理台帳（admin.htmlの「チャンネル管理」タブで登録）を読み込む。
-// 未登録の場合は空リストとして扱う（何も自動でブロックしない）。
-function loadChannelLedger(){
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.channels);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { return []; }
-}
-const CHANNEL_LEDGER = loadChannelLedger();
-const BLOCKED_CHANNELS = new Set(CHANNEL_LEDGER.filter(c => c.blocked === 'block').map(c => c.channel));
-const CHANNEL_LANGUAGE = new Map(CHANNEL_LEDGER.map(c => [c.channel, c.language]));
-
-function isChannelBlocked(channelName){
-  return BLOCKED_CHANNELS.has(channelName);
-}
-function passesLanguageFilter(channelName){
-  if (!japaneseOnlyEnabled) return true;
-  return CHANNEL_LANGUAGE.get(channelName) === 'ja';
-}
+const {
+  loadJapaneseOnly, saveJapaneseOnly,
+  gameById, timeAgoLabel, emptyHtml,
+  liveCardHtml, videoCardHtml, newsItemHtml,
+  getFilteredData,
+} = window.ASTRA_DATA;
 
 /* =========================================================
    2. 状態
    ========================================================= */
 let activeGames = new Set(GAMES.map(g => g.id));
-
-function loadJapaneseOnly(){
-  try { return localStorage.getItem(STORAGE_KEYS.japaneseOnly) === '1'; } catch (e) { return false; }
-}
-function saveJapaneseOnly(v){
-  try { localStorage.setItem(STORAGE_KEYS.japaneseOnly, v ? '1' : '0'); } catch (e) { /* 無視 */ }
-}
 let japaneseOnlyEnabled = loadJapaneseOnly();
 let popularRange = '24'; // 24 | 7 | 30
 
@@ -408,15 +340,6 @@ function saveSectionOrderList(arr){
 }
 let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','latest']
 let mobileTab = 'main';
-
-function gameById(id){ return GAMES.find(g => g.id === id); }
-function timeAgoLabel(publishedAt){
-  const min = Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 60000));
-  if (min < 60) return min + '分前';
-  const h = Math.floor(min/60);
-  if (h < 24) return h + '時間前';
-  return Math.floor(h/24) + '日前';
-}
 
 /* =========================================================
    3. 描画
@@ -445,62 +368,11 @@ function renderFilterBar(){
   });
 }
 
-function thumbStyle(g){
-  return `background: linear-gradient(135deg, ${g.color}, ${g.color}99);`;
-}
-
-function liveCardHtml(item){
-  const g = gameById(item.game);
-  return `<div class="media-card">
-    <div class="media-thumb landscape" style="${thumbStyle(g)}">
-      <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
-      ${g.name}
-    </div>
-    <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
-    <p class="card-title">${item.title}</p>
-    <div class="card-meta"><span>${item.channel}</span></div>
-  </div>`;
-}
-
-function videoCardHtml(item){
-  const g = gameById(item.game);
-  return `<div class="media-card">
-    <div class="media-thumb landscape" style="${thumbStyle(g)}">
-      <span class="badge-duration">${item.duration}</span>
-      ${g.name}
-    </div>
-    <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
-    <p class="card-title">${item.title}</p>
-    <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
-  </div>`;
-}
-
-function newsItemHtml(item){
-  const g = gameById(item.game);
-  return `<div class="news-item">
-    <div class="news-body">
-      <div class="card-tag-row">
-        <span class="tag" style="background:${g.color}">${g.name}</span>
-        <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
-      </div>
-      <p class="news-title">${item.title}</p>
-      <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
-    </div>
-    <div class="news-thumb" style="${thumbStyle(g)}">${g.name.slice(0,2)}</div>
-  </div>`;
-}
-
-function emptyHtml(msg){
-  return `<div class="empty-state">${msg || '該当する情報がありません。ゲームフィルターの選択をご確認ください。'}</div>`;
-}
-
 function liveSectionHtml(list){
   return `<div class="panel" id="live-section">
     <div class="panel-head">
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
-      <span class="panel-more">もっと見る ›</span>
-    </div>
-    <div class="card-grid">${list.length ? list.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>
+      <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
   </div>`;
 }
 
@@ -509,7 +381,7 @@ function popularSectionHtml(list){
   return `<div class="panel" id="popular-section">
     <div class="panel-head">
       <span class="panel-title">人気動画</span>
-      <span class="panel-more">もっと見る ›</span>
+      <a class="panel-more" href="list.html?type=popular">もっと見る ›</a>
     </div>
     <div class="pill-tabs" style="margin-bottom:14px;">
       <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
@@ -525,7 +397,7 @@ function latestSectionHtml(list){
   return `<div class="panel" id="latest-section">
     <div class="panel-head">
       <span class="panel-title">新着動画</span>
-      <span class="panel-more">もっと見る ›</span>
+      <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
     <div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>
   </div>`;
@@ -533,8 +405,7 @@ function latestSectionHtml(list){
 
 function renderMainContent(){
   const el = document.getElementById('mainContent');
-  const fLive = LIVE_NOW.filter(v => activeGames.has(v.game) && !isChannelBlocked(v.channel) && passesLanguageFilter(v.channel));
-  const fVideos = VIDEOS.filter(v => activeGames.has(v.game) && !isChannelBlocked(v.channel) && passesLanguageFilter(v.channel));
+  const { live: fLive, videos: fVideos } = getFilteredData(activeGames, japaneseOnlyEnabled);
 
   const blocks = {
     live: liveSectionHtml(fLive),
@@ -549,16 +420,16 @@ function renderMainContent(){
 }
 
 function renderSidebar(){
-  const filteredNews = NEWS.filter(n => activeGames.has(n.game))
-    .sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const { news } = getFilteredData(activeGames, japaneseOnlyEnabled);
+  const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
   document.getElementById('sidebarNews').innerHTML =
     filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
 }
 
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
-    const filteredNews = NEWS.filter(n => activeGames.has(n.game))
-      .sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    const { news } = getFilteredData(activeGames, japaneseOnlyEnabled);
+    const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     document.getElementById('mainContent').innerHTML =
       `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>
        <div class="news-list">${filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml()}</div></div>`;

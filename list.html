@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一覧 | AstraHub（アストラハブ）</title>
+<link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --page-bg: #f2f4f7;
+    --surface: #ffffff;
+    --surface-strong: #eef1f5;
+    --border: #e6e9ee;
+    --text: #12151b;
+    --text-secondary: #6b7280;
+    --text-faint: #9aa1ac;
+    --accent: #2c5ce0;
+    --accent-soft: #eaf0fe;
+    --accent-strong: #1c3fa8;
+    --live: #e23d3d;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font-display: 'Noto Sans JP', sans-serif;
+    --font-mono: 'Roboto Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--page-bg); color: var(--text); font-family: var(--font-display); font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .site-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top:0; z-index: 20; }
+  .header-inner { max-width: 1240px; margin: 0 auto; padding: 12px 20px; display:flex; align-items:center; gap: 20px; }
+  .logo img { height: 40px; }
+  .back-link { margin-left:auto; font-size: 13px; font-weight: 500; color: var(--accent); }
+  .back-link:hover { color: var(--accent-strong); }
+
+  .filter-bar-wrap { max-width: 1240px; margin: 0 auto; padding: 14px 20px; }
+  .filter-bar { display:flex; gap: 8px; flex-wrap: wrap; }
+  .game-chip {
+    display: inline-flex; align-items:center; gap:7px; padding: 8px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg);
+    font-size: 13px; font-weight: 500; color: var(--text-secondary); white-space: nowrap;
+  }
+  .game-chip .swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .game-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+  .game-chip.chip-all { background: var(--accent); border-color: var(--accent); color:#fff; font-weight:700; }
+  .game-chip.chip-all.inactive { background: var(--bg); border-color: var(--border); color: var(--text-secondary); font-weight:500; }
+
+  .page { max-width: 1240px; margin: 0 auto; padding: 0 20px 40px; }
+  .page-title { font-size: 18px; font-weight: 900; margin: 4px 0 16px; display:flex; align-items:center; gap:8px; }
+  .page-title .live-dot { width:9px; height:9px; border-radius:50%; background: var(--live); }
+
+  .pill-tabs { display:flex; gap:6px; margin-bottom: 16px; }
+  .pill-tab { border:1px solid var(--border); background: var(--bg); border-radius: var(--radius-md); padding: 6px 12px; font-size: 12.5px; font-weight:500; color: var(--text-secondary); }
+  .pill-tab.active { background: var(--accent); border-color: var(--accent); color:#fff; font-weight:700; }
+
+  .card-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 16px; }
+  .media-card { min-width: 0; }
+  .media-thumb {
+    position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden;
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; font-size:22px;
+    aspect-ratio: 16/9;
+  }
+  .badge-viewers { position:absolute; top:7px; left:7px; background: rgba(226,61,61,0.92); color:#fff; font-family: var(--font-mono); font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px; display:flex; align-items:center; gap:4px; }
+  .badge-duration { position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.72); color:#fff; font-family: var(--font-mono); font-size:10.5px; padding:1px 5px; border-radius:3px; }
+  .card-tag-row { display:flex; gap:6px; margin: 8px 0 5px; }
+  .tag { font-size: 10.5px; font-weight:700; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; }
+  .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
+  .card-title { font-size:13px; font-weight:500; margin:0 0 4px; line-height:1.4; }
+  .card-meta { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); display:flex; justify-content:space-between; }
+
+  .news-list { display:flex; flex-direction:column; background: var(--surface); border:1px solid var(--border); border-radius: var(--radius-lg); padding: 6px 18px; }
+  .news-item { display:flex; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); align-items:flex-start; }
+  .news-item:last-child { border-bottom:none; }
+  .news-body { min-width:0; flex:1; }
+  .news-thumb { width:64px; height:64px; border-radius: var(--radius-sm); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; font-size:14px; }
+  .news-title { font-size:14px; font-weight:500; margin:6px 0 4px; line-height:1.5; }
+  .news-time { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); }
+  .news-summary { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 4px; line-height:1.6; }
+
+  .empty-state { padding: 40px 10px; text-align:center; color: var(--text-faint); font-size:13px; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo"><img src="assets/logo.svg" alt="AstraHub"></div>
+    <a class="back-link" href="index.html">← トップに戻る</a>
+  </div>
+  <div class="filter-bar-wrap">
+    <div class="filter-bar" id="filterBar"></div>
+  </div>
+</header>
+
+<div class="page">
+  <div class="page-title" id="pageTitle"></div>
+  <div id="subTabs"></div>
+  <div id="listContent"></div>
+</div>
+
+<script src="assets/config.js"></script>
+<script src="assets/site-data.js"></script>
+<script>
+const { GAMES } = window.ASTRA_CONFIG;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, emptyHtml, getFilteredData, loadJapaneseOnly } = window.ASTRA_DATA;
+
+const params = new URLSearchParams(window.location.search);
+const type = params.get('type') || 'news';
+const japaneseOnlyEnabled = loadJapaneseOnly();
+
+const TITLES = {
+  live: 'LIVE配信 一覧',
+  popular: '人気動画 一覧',
+  latest: '新着動画 一覧',
+  news: '最新ニュース 一覧',
+};
+document.getElementById('pageTitle').innerHTML =
+  (type === 'live' ? '<span class="live-dot"></span>' : '') + (TITLES[type] || '一覧');
+
+let activeGames = new Set(GAMES.map(g => g.id));
+let popularRange = '24'; // 人気動画のみ使用
+
+function renderFilterBar(){
+  const allActive = activeGames.size === GAMES.length;
+  let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
+  html += GAMES.map(g => {
+    const active = activeGames.has(g.id);
+    return `<button class="game-chip ${active?'active':''}" data-game="${g.id}">
+      <span class="swatch" style="background:${g.color}"></span>${g.name}
+    </button>`;
+  }).join('');
+  document.getElementById('filterBar').innerHTML = html;
+
+  document.querySelector('[data-all]').addEventListener('click', () => {
+    activeGames = new Set(GAMES.map(g => g.id));
+    renderAll();
+  });
+  document.querySelectorAll('#filterBar .game-chip[data-game]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.game;
+      if (activeGames.has(id)) activeGames.delete(id); else activeGames.add(id);
+      renderAll();
+    });
+  });
+}
+
+function renderContent(){
+  const { news, live, videos } = getFilteredData(activeGames, japaneseOnlyEnabled);
+  const el = document.getElementById('listContent');
+  const subTabsEl = document.getElementById('subTabs');
+
+  if (type === 'live') {
+    subTabsEl.innerHTML = '';
+    el.innerHTML = `<div class="card-grid">${live.length ? live.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>`;
+    return;
+  }
+
+  if (type === 'popular') {
+    subTabsEl.innerHTML = `<div class="pill-tabs">
+      <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
+      <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
+      <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
+    </div>`;
+    document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
+      btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderContent(); });
+    });
+    const sorted = [...videos].sort((a,b) => b.views - a.views);
+    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
+    return;
+  }
+
+  if (type === 'latest') {
+    subTabsEl.innerHTML = '';
+    const sorted = [...videos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
+    return;
+  }
+
+  // news
+  subTabsEl.innerHTML = '';
+  const sorted = [...news].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  el.innerHTML = `<div class="news-list">${sorted.length ? sorted.map(newsItemWithSummaryHtml).join('') : emptyHtml()}</div>`;
+}
+
+// 一覧ページでは、ニュースに本文（要約）があれば見出しの下に表示する
+function newsItemWithSummaryHtml(item){
+  const g = gameById(item.game);
+  return `<div class="news-item">
+    <div class="news-body">
+      <div class="card-tag-row">
+        <span class="tag" style="background:${g.color}">${g.name}</span>
+        <span class="tag tag-cat">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
+      </div>
+      <p class="news-title">${item.title}</p>
+      ${item.summary ? `<p class="news-summary">${item.summary}</p>` : ''}
+      <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
+    </div>
+    <div class="news-thumb" style="background: linear-gradient(135deg, ${g.color}, ${g.color}99);">${g.name.slice(0,2)}</div>
+  </div>`;
+}
+
+function renderAll(){
+  renderFilterBar();
+  renderContent();
+}
+renderAll();
+</script>
+</body>
+</html>
