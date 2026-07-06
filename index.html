@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AstraHub（アストラハブ）</title>
+<link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --page-bg: #f2f4f7;
+    --surface: #ffffff;
+    --surface-strong: #eef1f5;
+    --border: #e6e9ee;
+    --text: #12151b;
+    --text-secondary: #6b7280;
+    --text-faint: #9aa1ac;
+    --accent: #2c5ce0;
+    --accent-soft: #eaf0fe;
+    --accent-strong: #1c3fa8;
+    --live: #e23d3d;
+    --brand-sky: #6EC6FF;
+    --brand-navy: #243B7A;
+    --brand-violet: #8B5CF6;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font-display: 'Noto Sans JP', sans-serif;
+    --font-mono: 'Roboto Mono', monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page-bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- Header ---------- */
+  .site-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+  .header-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .logo { display: flex; align-items: center; flex-shrink: 0; }
+  .logo img { height: 56px; width: auto; display: block; }
+
+  .top-nav { display: none; gap: 22px; }
+  @media (min-width: 760px) {
+    .top-nav { display: flex; }
+  }
+  .top-nav a {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13.5px; font-weight: 500; color: var(--text-secondary);
+  }
+  .top-nav a:hover { color: var(--accent); }
+
+  .header-right { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; }
+  .icon-btn {
+    border: 1px solid var(--border); background: var(--bg);
+    border-radius: var(--radius-md); width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary); font-size: 15px;
+  }
+  .icon-btn:hover { background: var(--surface-strong); }
+
+  /* ---------- Filter bar ---------- */
+  .filter-bar-wrap {
+    max-width: 1240px; margin: 0 auto; padding: 14px 20px 14px;
+  }
+  .filter-bar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .game-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    font-size: 13px; font-weight: 500; color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .game-chip .swatch {
+    width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+  }
+  .game-chip.active {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong);
+  }
+  .game-chip.chip-all {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
+  }
+  .game-chip.chip-all.inactive {
+    background: var(--bg); border-color: var(--border); color: var(--text-secondary); font-weight: 500;
+  }
+
+  /* ---------- Page ---------- */
+  .page {
+    max-width: 1240px; margin: 0 auto; padding: 20px;
+    display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start;
+  }
+  @media (max-width: 900px) {
+    .page { grid-template-columns: 1fr; padding: 14px 14px 70px; }
+    .sidebar { display: none; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    margin-bottom: 20px;
+    scroll-margin-top: 14px;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .panel-title {
+    font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px;
+  }
+  .panel-title .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
+  .panel-more { font-size: 12px; color: var(--accent); font-weight: 500; }
+
+  .pill-tabs { display: flex; gap: 6px; }
+  .pill-tab {
+    border: 1px solid var(--border); background: var(--bg);
+    border-radius: var(--radius-md); padding: 6px 12px;
+    font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
+  }
+  .pill-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+  /* ---------- Card grids ---------- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 14px;
+  }
+  .media-card { min-width: 0; }
+  .media-thumb {
+    position: relative; width: 100%; border-radius: var(--radius-md);
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 900; font-size: 22px; letter-spacing: 0.02em;
+  }
+  .media-thumb.portrait { aspect-ratio: 3/4; }
+  .media-thumb.landscape { aspect-ratio: 16/9; }
+  .badge-viewers {
+    position: absolute; top: 7px; left: 7px;
+    background: rgba(226,61,61,0.92); color: #fff;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    padding: 3px 7px; border-radius: 5px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .badge-duration {
+    position: absolute; right: 6px; bottom: 6px;
+    background: rgba(0,0,0,0.72); color: #fff;
+    font-family: var(--font-mono); font-size: 10.5px;
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .card-tag-row { display: flex; gap: 6px; margin: 8px 0 5px; }
+  .tag {
+    font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+    color: #fff; white-space: nowrap;
+  }
+  .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
+  .card-title {
+    font-size: 13px; font-weight: 500; margin: 0 0 4px; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-meta {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+    display: flex; justify-content: space-between;
+  }
+
+  /* ---------- Sidebar news ---------- */
+  .news-list { display: flex; flex-direction: column; }
+  .news-item {
+    display: flex; gap: 12px; padding: 12px 0;
+    border-bottom: 1px solid var(--border); align-items: flex-start;
+  }
+  .news-item:last-child { border-bottom: none; }
+  .news-body { min-width: 0; flex: 1; }
+  .news-thumb {
+    width: 56px; height: 56px; border-radius: var(--radius-sm);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 900; font-size: 13px;
+  }
+  .news-title {
+    font-size: 13px; font-weight: 500; margin: 6px 0 4px; line-height: 1.4;
+  }
+  .news-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
+
+  .empty-state { padding: 30px 10px; text-align: center; color: var(--text-faint); font-size: 13px; }
+
+  /* ---------- Mobile bottom tabs ---------- */
+  .mobile-tabbar { display: none; }
+  @media (max-width: 900px) {
+    .mobile-tabbar {
+      display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+      border-top: 1px solid var(--border); background: var(--bg); z-index: 20;
+    }
+    .mobile-tabbar button { flex: 1; border: none; background: none; padding: 10px 0 8px; font-size: 11px; color: var(--text-faint); font-weight: 500; }
+    .mobile-tabbar button.active { color: var(--accent); font-weight: 700; }
+  }
+
+  /* ---------- Side panel (settings) ---------- */
+  .panel-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 30; display: none; }
+  .side-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 88vw);
+    background: var(--bg); z-index: 31; padding: 18px; overflow-y: auto;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.08); display: none;
+  }
+  .side-panel h3 { font-size: 14px; margin: 0 0 12px; }
+  .side-panel .close-btn { position: absolute; top: 14px; right: 14px; border: none; background: none; font-size: 18px; color: var(--text-faint); }
+  .filter-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .apply-btn { width: 100%; margin-top: 16px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px; font-weight: 700; font-size: 13px; }
+  .order-hint { font-size: 12px; color: var(--text-faint); margin: -4px 0 14px; }
+  .order-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+    margin-bottom: 8px; background: var(--surface-strong);
+  }
+  .order-label { font-size: 13px; font-weight: 500; }
+  .order-btns { display: flex; gap: 4px; }
+  .order-btn {
+    width: 28px; height: 28px; border: 1px solid var(--border); background: var(--bg);
+    border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .order-btn:disabled { opacity: 0.3; cursor: default; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo">
+      <img src="assets/logo.svg" alt="AstraHub">
+    </div>
+    <nav class="top-nav">
+      <a href="#" data-scroll="live-section">LIVE</a>
+      <a href="#" data-scroll="popular-section">人気動画</a>
+      <a href="#" data-scroll="latest-section">新着動画</a>
+      <a href="#" data-scroll="news-section" data-mobile-tab="news">最新ニュース</a>
+    </nav>
+    <div class="header-right">
+      <button class="icon-btn" id="settingsOpenBtn" title="表示順の設定" aria-label="表示順の設定">⚙</button>
+    </div>
+  </div>
+  <div class="filter-bar-wrap">
+    <div class="filter-bar" id="filterBar"></div>
+  </div>
+</header>
+
+<div class="page">
+  <main id="mainContent"></main>
+
+  <aside class="sidebar">
+    <div class="panel" id="news-section">
+      <div class="panel-head">
+        <span class="panel-title">最新ニュース</span>
+        <span class="panel-more">もっと見る ›</span>
+      </div>
+      <div class="news-list" id="sidebarNews"></div>
+    </div>
+  </aside>
+</div>
+
+<nav class="mobile-tabbar" id="mobileTabbar">
+  <button data-tab="main" class="active">メイン</button>
+  <button data-tab="news">ニュース</button>
+</nav>
+
+<div class="panel-backdrop" id="panelBackdrop"></div>
+<div class="side-panel" id="settingsPanel">
+  <button class="close-btn" id="settingsCloseBtn">×</button>
+  <h3>表示順を並び替える</h3>
+  <p class="order-hint">▲▼で好きな順番に変更できます（自動的に保存されます）</p>
+  <div id="settingsRows"></div>
+
+  <h3 style="margin-top:20px;">表示するコンテンツの言語</h3>
+  <label class="filter-row" style="border:none; padding:6px 0;">
+    <input type="checkbox" id="japaneseOnlyCheckbox">
+    日本語の配信・動画のみ表示する
+  </label>
+  <p class="order-hint">チャンネル管理台帳で「言語：日本語」と登録されているチャンネルのみ表示します。未登録のチャンネルは、この設定をONにすると表示されなくなります。</p>
+</div>
+
+<script src="assets/config.js"></script>
+<script>
+/* =========================================================
+   1. マスターデータ
+   - GAMES / CATEGORY_LABEL は assets/config.js から読み込み
+   - ニュース・配信・動画は「管理画面(admin.html)で登録したデータ」があればそれを使い、
+     何も登録されていない場合はサンプル（ダミー）データを表示する
+   ========================================================= */
+const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CONFIG;
+
+// ※以下はすべてサンプル（ダミー）データです。管理画面でデータを登録すると自動的にこちらは表示されなくなります。
+const SAMPLE_NEWS = [
+  { game:'genshin', cat:'character',   title:'[サンプル] 新キャラクター「ドゥリン」公開', minutesAgo: 2 },
+  { game:'hsr',     cat:'version',     title:'[サンプル] Ver.2.3「さよなら、ピノコニー」予告', minutesAgo: 15 },
+  { game:'zzz',     cat:'stream',      title:'[サンプル] Ver.1.5 予告番組まとめ', minutesAgo: 60 },
+  { game:'ww',      cat:'version',     title:'[サンプル] Ver.2.0「静寂の黎明」紹介', minutesAgo: 120 },
+  { game:'nte',     cat:'event',       title:'[サンプル] クローズドβテスト募集開始', minutesAgo: 180 },
+  { game:'genshin', cat:'maintenance', title:'[サンプル] 臨時メンテナンスのお知らせ', minutesAgo: 240 },
+];
+const SAMPLE_LIVE = [
+  { game:'genshin', title:'[サンプル] Ver.6.2 予告番組視聴枠', channel:'原神公式', viewers: 12345 },
+  { game:'hsr',     title:'[サンプル] 開拓ラジオ 特別放送', channel:'崩壊：スターレイル公式', viewers: 8705 },
+  { game:'zzz',     title:'[サンプル] 新エリー都へようこそ！', channel:'ZZZ公式', viewers: 6549 },
+  { game:'ww',      title:'[サンプル] Ver.2.0 特別通信', channel:'鳴潮公式', viewers: 3210 },
+  { game:'nte',     title:'[サンプル] 探索テスト 配信中！', channel:'NTE公式', viewers: 2111 },
+];
+const SAMPLE_VIDEOS = [
+  { game:'genshin', title:'[サンプル] Ver.6.2で絶対やるべきこと5選', channel:'原神公式', views: 287000, duration:'5:24', minutesAgo: 40 },
+  { game:'hsr',     title:'[サンプル] 2.3速報！新キャラの性能解説', channel:'スターレイル攻略ch', views: 213000, duration:'3:40', minutesAgo: 90 },
+  { game:'zzz',     title:'[サンプル] 新キャラ性能解説｜おすすめ編成', channel:'ZZZ攻略部', views: 189000, duration:'6:18', minutesAgo: 130 },
+  { game:'ww',      title:'[サンプル] キャラ完全解説｜おすすめ武器・編成', channel:'鳴潮研究所', views: 124000, duration:'4:57', minutesAgo: 220 },
+  { game:'nte',     title:'[サンプル] NTEの世界を10分で紹介', channel:'NTE公式', views: 98000, duration:'3:33', minutesAgo: 300 },
+];
+
+// サンプルの minutesAgo を、実データと同じ「絶対時刻(publishedAt)」形式に変換しておく
+function sampleToTimestamped(list){
+  const now = Date.now();
+  return list.map(item => {
+    const minutesAgo = typeof item.minutesAgo === 'number' ? item.minutesAgo : 0;
+    return { ...item, publishedAt: new Date(now - minutesAgo * 60000).toISOString() };
+  });
+}
+
+function loadList(storageKey, sample){
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr) && arr.length > 0) return arr;
+  } catch (e) { /* 保存データが壊れている場合はサンプルにフォールバック */ }
+  return sampleToTimestamped(sample);
+}
+
+const NEWS = loadList(STORAGE_KEYS.news, SAMPLE_NEWS);
+const LIVE_NOW = loadList(STORAGE_KEYS.live, SAMPLE_LIVE);
+const VIDEOS = loadList(STORAGE_KEYS.videos, SAMPLE_VIDEOS);
+
+// チャンネル管理台帳（admin.htmlの「チャンネル管理」タブで登録）を読み込む。
+// 未登録の場合は空リストとして扱う（何も自動でブロックしない）。
+function loadChannelLedger(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.channels);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+const CHANNEL_LEDGER = loadChannelLedger();
+const BLOCKED_CHANNELS = new Set(CHANNEL_LEDGER.filter(c => c.blocked === 'block').map(c => c.channel));
+const CHANNEL_LANGUAGE = new Map(CHANNEL_LEDGER.map(c => [c.channel, c.language]));
+
+function isChannelBlocked(channelName){
+  return BLOCKED_CHANNELS.has(channelName);
+}
+function passesLanguageFilter(channelName){
+  if (!japaneseOnlyEnabled) return true;
+  return CHANNEL_LANGUAGE.get(channelName) === 'ja';
+}
+
+/* =========================================================
+   2. 状態
+   ========================================================= */
+let activeGames = new Set(GAMES.map(g => g.id));
+
+function loadJapaneseOnly(){
+  try { return localStorage.getItem(STORAGE_KEYS.japaneseOnly) === '1'; } catch (e) { return false; }
+}
+function saveJapaneseOnly(v){
+  try { localStorage.setItem(STORAGE_KEYS.japaneseOnly, v ? '1' : '0'); } catch (e) { /* 無視 */ }
+}
+let japaneseOnlyEnabled = loadJapaneseOnly();
+let popularRange = '24'; // 24 | 7 | 30
+
+function loadSectionOrderList(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.sectionOrder);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr) && arr.length === 3 && ['live','popular','latest'].every(k => arr.includes(k))) return arr;
+  } catch (e) { /* 保存できない/壊れている場合は既定値を使う */ }
+  return ['live', 'popular', 'latest'];
+}
+function saveSectionOrderList(arr){
+  try { localStorage.setItem(STORAGE_KEYS.sectionOrder, JSON.stringify(arr)); } catch (e) { /* 無視 */ }
+}
+let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','latest']
+let mobileTab = 'main';
+
+function gameById(id){ return GAMES.find(g => g.id === id); }
+function timeAgoLabel(publishedAt){
+  const min = Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 60000));
+  if (min < 60) return min + '分前';
+  const h = Math.floor(min/60);
+  if (h < 24) return h + '時間前';
+  return Math.floor(h/24) + '日前';
+}
+
+/* =========================================================
+   3. 描画
+   ========================================================= */
+function renderFilterBar(){
+  const allActive = activeGames.size === GAMES.length;
+  let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
+  html += GAMES.map(g => {
+    const active = activeGames.has(g.id);
+    return `<button class="game-chip ${active?'active':''}" data-game="${g.id}">
+      <span class="swatch" style="background:${g.color}"></span>${g.name}
+    </button>`;
+  }).join('');
+  document.getElementById('filterBar').innerHTML = html;
+
+  document.querySelector('[data-all]').addEventListener('click', () => {
+    activeGames = new Set(GAMES.map(g => g.id));
+    renderAll();
+  });
+  document.querySelectorAll('#filterBar .game-chip[data-game]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.game;
+      if (activeGames.has(id)) activeGames.delete(id); else activeGames.add(id);
+      renderAll();
+    });
+  });
+}
+
+function thumbStyle(g){
+  return `background: linear-gradient(135deg, ${g.color}, ${g.color}99);`;
+}
+
+function liveCardHtml(item){
+  const g = gameById(item.game);
+  return `<div class="media-card">
+    <div class="media-thumb landscape" style="${thumbStyle(g)}">
+      <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
+      ${g.name}
+    </div>
+    <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
+    <p class="card-title">${item.title}</p>
+    <div class="card-meta"><span>${item.channel}</span></div>
+  </div>`;
+}
+
+function videoCardHtml(item){
+  const g = gameById(item.game);
+  return `<div class="media-card">
+    <div class="media-thumb landscape" style="${thumbStyle(g)}">
+      <span class="badge-duration">${item.duration}</span>
+      ${g.name}
+    </div>
+    <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
+    <p class="card-title">${item.title}</p>
+    <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
+  </div>`;
+}
+
+function newsItemHtml(item){
+  const g = gameById(item.game);
+  return `<div class="news-item">
+    <div class="news-body">
+      <div class="card-tag-row">
+        <span class="tag" style="background:${g.color}">${g.name}</span>
+        <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
+      </div>
+      <p class="news-title">${item.title}</p>
+      <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
+    </div>
+    <div class="news-thumb" style="${thumbStyle(g)}">${g.name.slice(0,2)}</div>
+  </div>`;
+}
+
+function emptyHtml(msg){
+  return `<div class="empty-state">${msg || '該当する情報がありません。ゲームフィルターの選択をご確認ください。'}</div>`;
+}
+
+function liveSectionHtml(list){
+  return `<div class="panel" id="live-section">
+    <div class="panel-head">
+      <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
+      <span class="panel-more">もっと見る ›</span>
+    </div>
+    <div class="card-grid">${list.length ? list.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>
+  </div>`;
+}
+
+function popularSectionHtml(list){
+  const sorted = [...list].sort((a,b) => b.views - a.views);
+  return `<div class="panel" id="popular-section">
+    <div class="panel-head">
+      <span class="panel-title">人気動画</span>
+      <span class="panel-more">もっと見る ›</span>
+    </div>
+    <div class="pill-tabs" style="margin-bottom:14px;">
+      <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
+      <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
+      <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
+    </div>
+    <div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>
+  </div>`;
+}
+
+function latestSectionHtml(list){
+  const sorted = [...list].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  return `<div class="panel" id="latest-section">
+    <div class="panel-head">
+      <span class="panel-title">新着動画</span>
+      <span class="panel-more">もっと見る ›</span>
+    </div>
+    <div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>
+  </div>`;
+}
+
+function renderMainContent(){
+  const el = document.getElementById('mainContent');
+  const fLive = LIVE_NOW.filter(v => activeGames.has(v.game) && !isChannelBlocked(v.channel) && passesLanguageFilter(v.channel));
+  const fVideos = VIDEOS.filter(v => activeGames.has(v.game) && !isChannelBlocked(v.channel) && passesLanguageFilter(v.channel));
+
+  const blocks = {
+    live: liveSectionHtml(fLive),
+    popular: popularSectionHtml(fVideos),
+    latest: latestSectionHtml(fVideos),
+  };
+  el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('');
+
+  document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
+    btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
+  });
+}
+
+function renderSidebar(){
+  const filteredNews = NEWS.filter(n => activeGames.has(n.game))
+    .sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  document.getElementById('sidebarNews').innerHTML =
+    filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
+}
+
+function renderMobileMain(){
+  if (window.innerWidth <= 900 && mobileTab === 'news') {
+    const filteredNews = NEWS.filter(n => activeGames.has(n.game))
+      .sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    document.getElementById('mainContent').innerHTML =
+      `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>
+       <div class="news-list">${filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml()}</div></div>`;
+    return true;
+  }
+  return false;
+}
+
+function renderAll(){
+  renderFilterBar();
+  const handledByMobile = renderMobileMain();
+  if (!handledByMobile) renderMainContent();
+  renderSidebar();
+}
+renderAll();
+
+/* =========================================================
+   4. 設定パネル
+   ========================================================= */
+function closeSettings(){
+  document.getElementById('settingsPanel').style.display = 'none';
+  document.getElementById('panelBackdrop').style.display = 'none';
+}
+function renderSettingsRows(){
+  document.getElementById('settingsRows').innerHTML = sectionOrderArr.map((key, idx) => `
+    <div class="order-row" data-key="${key}">
+      <span class="order-label">${SECTION_LABELS[key]}</span>
+      <div class="order-btns">
+        <button class="order-btn" data-dir="up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+        <button class="order-btn" data-dir="down" data-idx="${idx}" ${idx === sectionOrderArr.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.order-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      const swapWith = btn.dataset.dir === 'up' ? idx - 1 : idx + 1;
+      if (swapWith < 0 || swapWith >= sectionOrderArr.length) return;
+      [sectionOrderArr[idx], sectionOrderArr[swapWith]] = [sectionOrderArr[swapWith], sectionOrderArr[idx]];
+      saveSectionOrderList(sectionOrderArr);
+      renderSettingsRows();
+      renderMainContent();
+    });
+  });
+}
+
+document.getElementById('panelBackdrop').addEventListener('click', closeSettings);
+document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+document.getElementById('settingsOpenBtn').addEventListener('click', () => {
+  renderSettingsRows();
+  document.getElementById('japaneseOnlyCheckbox').checked = japaneseOnlyEnabled;
+  document.getElementById('settingsPanel').style.display = 'block';
+  document.getElementById('panelBackdrop').style.display = 'block';
+});
+document.getElementById('japaneseOnlyCheckbox').addEventListener('change', (e) => {
+  japaneseOnlyEnabled = e.target.checked;
+  saveJapaneseOnly(japaneseOnlyEnabled);
+  renderMainContent();
+});
+
+/* =========================================================
+   5. モバイルタブ / ヘッダーのニュースリンク
+   ========================================================= */
+document.querySelectorAll('#mobileTabbar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    mobileTab = btn.dataset.tab;
+    document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderAll();
+  });
+});
+document.querySelectorAll('.top-nav a[data-scroll]').forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const isNarrow = window.innerWidth <= 900;
+    // 幅が狭い（サイドバーが非表示の）画面では、対象が「最新ニュース」ならモバイル用ニュースタブに切り替える
+    if (isNarrow && link.dataset.mobileTab) {
+      mobileTab = link.dataset.mobileTab;
+      document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
+      document.querySelector(`#mobileTabbar [data-tab="${mobileTab}"]`)?.classList.add('active');
+      renderAll();
+      return;
+    }
+    // 狭い画面で「メイン」側の項目を押されたとき、今ニュースタブを見ていたら先にメインへ戻す
+    if (isNarrow && mobileTab !== 'main' && !link.dataset.mobileTab) {
+      mobileTab = 'main';
+      document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
+      document.querySelector('#mobileTabbar [data-tab="main"]')?.classList.add('active');
+      renderAll();
+    }
+    const target = document.getElementById(link.dataset.scroll);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+window.addEventListener('resize', renderAll);
+</script>
+</body>
+</html>

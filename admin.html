@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AstraHub 管理画面（ローカル用）</title>
+<link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#ffffff; --page-bg:#f2f4f7; --surface:#ffffff; --surface-strong:#eef1f5;
+    --border:#e6e9ee; --text:#12151b; --text-secondary:#6b7280; --text-faint:#9aa1ac;
+    --accent:#2c5ce0; --accent-soft:#eaf0fe; --accent-strong:#1c3fa8; --live:#e23d3d;
+    --radius-sm:4px; --radius-md:8px; --radius-lg:12px;
+    --font-display:'Noto Sans JP', sans-serif; --font-mono:'Roboto Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; }
+  body { background: var(--page-bg); color: var(--text); font-family: var(--font-display); font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  a { color: inherit; }
+  button, select, input, textarea { font-family: inherit; font-size: 13px; }
+
+  .site-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top:0; z-index:10; }
+  .header-inner { max-width: 1000px; margin: 0 auto; padding: 12px 20px; display:flex; align-items:center; gap:14px; }
+  .header-inner img { height: 40px; }
+  .header-inner .badge { font-family: var(--font-mono); font-size:11px; color:#fff; background:var(--accent); padding:3px 8px; border-radius:5px; font-weight:700; }
+  .header-inner .back-link { margin-left:auto; font-size:12.5px; color: var(--accent); font-weight:500; text-decoration:none; }
+
+  .page { max-width: 1000px; margin: 0 auto; padding: 20px; }
+
+  .tab-bar { display:flex; gap:8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .tab-btn { border:1px solid var(--border); background:var(--bg); border-radius: var(--radius-md); padding: 9px 16px; font-weight:500; color: var(--text-secondary); }
+  .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight:700; }
+
+  .panel { background: var(--surface); border:1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size:15px; margin: 0 0 14px; }
+  .hint { font-size:12px; color: var(--text-faint); margin: -6px 0 14px; line-height:1.6; }
+
+  .form-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 12px; margin-bottom: 14px; }
+  .field label { display:block; font-size:12px; color: var(--text-secondary); margin-bottom:5px; font-weight:500; }
+  .field input, .field select, .field textarea {
+    width:100%; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg); color: var(--text);
+  }
+  .field.full { grid-column: 1 / -1; }
+  .submit-btn { background: var(--accent); color:#fff; border:none; border-radius: var(--radius-md); padding: 10px 20px; font-weight:700; font-size:13px; }
+  .submit-btn:hover { background: var(--accent-strong); }
+
+  table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align:left; padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-faint); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; }
+  tr:last-child td { border-bottom:none; }
+  .swatch-tag { display:inline-flex; align-items:center; gap:5px; font-weight:700; font-size:11px; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; }
+  .del-btn { border:1px solid var(--border); background:var(--bg); color: var(--live); border-radius: var(--radius-sm); padding: 4px 9px; font-size:11.5px; }
+  .del-btn:hover { background:#fdeaea; }
+  .empty-row td { text-align:center; color: var(--text-faint); padding: 24px 0; }
+  .url-cell { max-width: 220px; overflow:hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size:11px; color: var(--accent); }
+  .summary-cell { max-width: 260px; overflow:hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+
+  .table-wrap { overflow-x:auto; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--text); color:#fff; padding: 10px 18px; border-radius: var(--radius-md);
+    font-size: 13px; opacity:0; pointer-events:none; transition: opacity 0.25s;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <img src="assets/logo.svg" alt="AstraHub">
+    <span class="badge">管理画面</span>
+    <a class="back-link" href="index.html">← サイトを見る</a>
+  </div>
+</header>
+
+<div class="page">
+  <div class="tab-bar" id="tabBar"></div>
+  <div id="tabContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/config.js"></script>
+<script>
+const { GAMES, CATEGORY_LABEL, STORAGE_KEYS } = window.ASTRA_CONFIG;
+
+const TYPES = {
+  news: {
+    label: 'ニュース',
+    fields: [
+      { key:'game', label:'ゲーム', type:'game-select' },
+      { key:'cat', label:'カテゴリ', type:'select', options: Object.entries(CATEGORY_LABEL).map(([v,l]) => ({value:v, label:l})) },
+      { key:'title', label:'タイトル（見出し）', type:'text', full:true, placeholder:'例：新キャラクター「○○」公開' },
+      { key:'summary', label:'本文（要約）', type:'textarea', full:true, placeholder:'見出しより少し詳しい説明文（100〜200文字程度）' },
+      { key:'url', label:'元ツイート/公式ページのURL', type:'text', full:true, placeholder:'https://x.com/...' },
+    ],
+    columns: ['game','cat','title','summary','url','time'],
+  },
+  live: {
+    label: '配信中(LIVE)',
+    fields: [
+      { key:'game', label:'ゲーム', type:'game-select' },
+      { key:'channel', label:'チャンネル名', type:'text', placeholder:'例：原神公式' },
+      { key:'viewers', label:'視聴者数', type:'number', placeholder:'例：12345' },
+      { key:'title', label:'配信タイトル', type:'text', full:true },
+      { key:'url', label:'配信URL（YouTube/Twitch）', type:'text', full:true, placeholder:'https://...' },
+    ],
+    columns: ['game','channel','title','viewers','url'],
+  },
+  videos: {
+    label: '動画',
+    fields: [
+      { key:'game', label:'ゲーム', type:'game-select' },
+      { key:'channel', label:'チャンネル名', type:'text' },
+      { key:'duration', label:'動画の長さ（例: 4:57）', type:'text', placeholder:'4:57' },
+      { key:'views', label:'再生数', type:'number', placeholder:'例：120000' },
+      { key:'title', label:'動画タイトル', type:'text', full:true },
+      { key:'url', label:'動画URL', type:'text', full:true, placeholder:'https://...' },
+    ],
+    columns: ['game','channel','title','views','duration','url','time'],
+  },
+  channels: {
+    label: 'チャンネル管理',
+    fields: [
+      { key:'game', label:'ゲーム', type:'game-select' },
+      { key:'platform', label:'プラットフォーム', type:'select', options: [
+        {value:'youtube', label:'YouTube'}, {value:'twitch', label:'Twitch'}, {value:'other', label:'その他'},
+      ] },
+      { key:'channel', label:'チャンネル名（表示名と完全一致させてください）', type:'text', full:true, placeholder:'例：原神公式' },
+      { key:'language', label:'言語', type:'select', options: [
+        {value:'ja', label:'日本語'}, {value:'en', label:'英語'}, {value:'other', label:'その他'},
+      ] },
+      { key:'blocked', label:'掲載可否', type:'select', options: [
+        {value:'allow', label:'掲載する'}, {value:'block', label:'非掲載にする'},
+      ] },
+      { key:'blockReason', label:'非掲載の理由（任意）', type:'text', full:true, placeholder:'例：投稿者からの掲載停止要望／不適切な内容' },
+    ],
+    columns: ['game','platform','channel','language','blocked','blockReason'],
+    requiredKey: 'channel',
+  },
+};
+
+let activeType = 'news';
+
+function storageKeyFor(type){
+  if (type === 'news') return STORAGE_KEYS.news;
+  if (type === 'live') return STORAGE_KEYS.live;
+  if (type === 'videos') return STORAGE_KEYS.videos;
+  return STORAGE_KEYS.channels;
+}
+function loadItems(type){
+  try {
+    const raw = localStorage.getItem(storageKeyFor(type));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function saveItems(type, items){
+  try { localStorage.setItem(storageKeyFor(type), JSON.stringify(items)); } catch (e) { showToast('保存に失敗しました（ブラウザのストレージ設定をご確認ください）'); }
+}
+function gameById(id){ return GAMES.find(g => g.id === id); }
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+function renderTabBar(){
+  document.getElementById('tabBar').innerHTML = Object.keys(TYPES).map(key =>
+    `<button class="tab-btn ${activeType===key?'active':''}" data-type="${key}">${TYPES[key].label}</button>`
+  ).join('');
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => { activeType = btn.dataset.type; renderTabBar(); renderTabContent(); });
+  });
+}
+
+function fieldHtml(f){
+  if (f.type === 'game-select') {
+    return `<div class="field${f.full?' full':''}"><label>${f.label}</label>
+      <select data-field="${f.key}">${GAMES.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}</select>
+    </div>`;
+  }
+  if (f.type === 'select') {
+    return `<div class="field${f.full?' full':''}"><label>${f.label}</label>
+      <select data-field="${f.key}">${f.options.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}</select>
+    </div>`;
+  }
+  if (f.type === 'textarea') {
+    return `<div class="field${f.full?' full':''}"><label>${f.label}</label>
+      <textarea data-field="${f.key}" rows="3" placeholder="${f.placeholder || ''}"></textarea>
+    </div>`;
+  }
+  return `<div class="field${f.full?' full':''}"><label>${f.label}</label>
+    <input type="${f.type}" data-field="${f.key}" placeholder="${f.placeholder || ''}">
+  </div>`;
+}
+
+function renderTabContent(){
+  const type = TYPES[activeType];
+  const items = loadItems(activeType);
+
+  const formHtml = `
+    <div class="panel">
+      <h2>新規登録：${type.label}</h2>
+      <p class="hint">Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。</p>
+      <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}</div>
+      <button class="submit-btn" id="submitBtn">登録する</button>
+    </div>
+  `;
+
+  const rows = items.map((item, idx) => {
+    const g = gameById(item.game);
+    return `<tr>
+      ${type.columns.map(col => {
+        if (col === 'game') return `<td><span class="swatch-tag" style="background:${g ? g.color : '#999'}">${g ? g.name : item.game}</span></td>`;
+        if (col === 'cat') return `<td>${CATEGORY_LABEL[item.cat] || item.cat}</td>`;
+        if (col === 'url') return `<td class="url-cell" title="${item.url || ''}">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener">${item.url}</a>` : '－'}</td>`;
+        if (col === 'summary') return `<td class="summary-cell" title="${(item.summary || '').replace(/"/g,'&quot;')}">${item.summary || '－'}</td>`;
+        if (col === 'platform') return `<td>${({youtube:'YouTube', twitch:'Twitch', other:'その他'})[item.platform] || item.platform}</td>`;
+        if (col === 'language') return `<td>${({ja:'日本語', en:'英語', other:'その他'})[item.language] || item.language}</td>`;
+        if (col === 'blocked') return `<td>${item.blocked === 'block' ? '<span class="swatch-tag" style="background:#e23d3d">非掲載</span>' : '<span class="swatch-tag" style="background:#1fae7a">掲載中</span>'}</td>`;
+        if (col === 'blockReason') return `<td>${item.blockReason || '－'}</td>`;
+        if (col === 'time') return `<td>${new Date(item.publishedAt).toLocaleString('ja-JP')}</td>`;
+        if (col === 'views' || col === 'viewers') return `<td>${(item[col] || 0).toLocaleString()}</td>`;
+        return `<td>${item[col] ?? ''}</td>`;
+      }).join('')}
+      <td><button class="del-btn" data-idx="${idx}">削除</button></td>
+    </tr>`;
+  }).join('');
+
+  const tableHtml = `
+    <div class="panel">
+      <h2>登録済み一覧（${items.length}件）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            ${type.columns.map(c => `<th>${({game:'ゲーム',cat:'カテゴリ',title:'タイトル',summary:'本文',url:'URL',time:'登録日時',channel:'チャンネル',viewers:'視聴者数',views:'再生数',duration:'長さ',platform:'プラットフォーム',language:'言語',blocked:'掲載可否',blockReason:'非掲載理由'})[c]}</th>`).join('')}
+            <th></th>
+          </tr></thead>
+          <tbody>${rows || `<tr class="empty-row"><td colspan="${type.columns.length+1}">まだ登録がありません</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('tabContent').innerHTML = formHtml + tableHtml;
+
+  document.getElementById('submitBtn').addEventListener('click', () => {
+    const newItem = { publishedAt: new Date().toISOString() };
+    const requiredKey = type.requiredKey || 'title';
+    let hasRequired = false;
+    document.querySelectorAll('#formGrid [data-field]').forEach(el => {
+      const key = el.dataset.field;
+      let val = el.value;
+      if (el.type === 'number') val = Number(val) || 0;
+      newItem[key] = val;
+      if (key === requiredKey && String(val).trim()) hasRequired = true;
+    });
+    if (!hasRequired) {
+      const label = (type.fields.find(f => f.key === requiredKey) || {}).label || requiredKey;
+      showToast(`${label}を入力してください`);
+      return;
+    }
+
+    const current = loadItems(activeType);
+    current.unshift(newItem); // 新しいものを先頭に
+    saveItems(activeType, current);
+    showToast('登録しました');
+    renderTabContent();
+  });
+
+  document.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      const current = loadItems(activeType);
+      current.splice(idx, 1);
+      saveItems(activeType, current);
+      renderTabContent();
+    });
+  });
+}
+
+renderTabBar();
+renderTabContent();
+</script>
+</body>
+</html>
