@@ -397,6 +397,8 @@ function liveSectionHtml(list){
     <div class="panel-head">
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
       <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
+    </div>
+    <div class="card-grid">${list.length ? list.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>
   </div>`;
 }
 
