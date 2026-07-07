@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AstraHub（アストラハブ）</title>
+<title>AstralHub（アストラルハブ）</title>
 <link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -162,6 +162,12 @@
   }
   .media-thumb.portrait { aspect-ratio: 3/4; }
   .media-thumb.landscape { aspect-ratio: 16/9; }
+  .game-icon { object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+  .game-icon.icon-md { width: 48px; height: 48px; }
+  .game-icon.icon-sm { max-width: 65%; max-height: 65%; }
+  .game-icon-fallback { color: #fff; font-weight: 900; }
+  .game-icon-fallback.icon-md { font-size: 20px; }
+  .game-icon-fallback.icon-sm { font-size: 15px; }
   .badge-viewers {
     position: absolute; top: 7px; left: 7px;
     background: rgba(226,61,61,0.92); color: #fff;
@@ -210,6 +216,17 @@
 
   .empty-state { padding: 30px 10px; text-align: center; color: var(--text-faint); font-size: 13px; }
 
+  .site-footer { border-top: 1px solid var(--border); margin-top: 8px; }
+  .footer-inner {
+    max-width: 1240px; margin: 0 auto; padding: 18px 20px 80px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+    font-size: 12px; color: var(--text-faint);
+  }
+  .footer-inner a { color: var(--accent); font-weight: 500; }
+  @media (min-width: 901px) {
+    .footer-inner { padding-bottom: 24px; }
+  }
+
   /* ---------- Mobile bottom tabs ---------- */
   .mobile-tabbar { display: none; }
   @media (max-width: 900px) {
@@ -252,14 +269,14 @@
 
 <header class="site-header">
   <div class="header-inner">
-    <div class="logo">
-      <img src="assets/logo.svg" alt="AstraHub">
-    </div>
+    <a class="logo" href="index.html">
+      <img src="assets/logo.svg" alt="AstralHub">
+    </a>
     <nav class="top-nav">
-      <a href="#" data-scroll="live-section">LIVE</a>
-      <a href="#" data-scroll="popular-section">人気動画</a>
-      <a href="#" data-scroll="latest-section">新着動画</a>
-      <a href="#" data-scroll="news-section" data-mobile-tab="news">最新ニュース</a>
+      <a href="list.html?type=live">LIVE</a>
+      <a href="list.html?type=popular">人気動画</a>
+      <a href="list.html?type=latest">新着動画</a>
+      <a href="list.html?type=news">最新ニュース</a>
     </nav>
     <div class="header-right">
       <button class="icon-btn" id="settingsOpenBtn" title="表示順の設定" aria-label="表示順の設定">⚙</button>
@@ -283,6 +300,13 @@
     </div>
   </aside>
 </div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span>&copy; 2026 AstralHub</span>
+    <a href="mailto:contact@example.com?subject=AstralHubへのお問い合わせ">管理人への問い合わせ</a>
+  </div>
+</footer>
 
 <nav class="mobile-tabbar" id="mobileTabbar">
   <button data-tab="main" class="active">メイン</button>
@@ -500,29 +524,6 @@ document.querySelectorAll('#mobileTabbar button').forEach(btn => {
     document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     renderAll();
-  });
-});
-document.querySelectorAll('.top-nav a[data-scroll]').forEach(link => {
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    const isNarrow = window.innerWidth <= 900;
-    // 幅が狭い（サイドバーが非表示の）画面では、対象が「最新ニュース」ならモバイル用ニュースタブに切り替える
-    if (isNarrow && link.dataset.mobileTab) {
-      mobileTab = link.dataset.mobileTab;
-      document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
-      document.querySelector(`#mobileTabbar [data-tab="${mobileTab}"]`)?.classList.add('active');
-      renderAll();
-      return;
-    }
-    // 狭い画面で「メイン」側の項目を押されたとき、今ニュースタブを見ていたら先にメインへ戻す
-    if (isNarrow && mobileTab !== 'main' && !link.dataset.mobileTab) {
-      mobileTab = 'main';
-      document.querySelectorAll('#mobileTabbar button').forEach(b => b.classList.remove('active'));
-      document.querySelector('#mobileTabbar [data-tab="main"]')?.classList.add('active');
-      renderAll();
-    }
-    const target = document.getElementById(link.dataset.scroll);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 });
 window.addEventListener('resize', renderAll);

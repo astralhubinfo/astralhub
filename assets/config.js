@@ -1,15 +1,15 @@
 /**
- * AstraHub 共通設定ファイル
+ * AstralHub 共通設定ファイル
  * index.html と admin.html の両方から読み込まれます。
  * ゲームやカテゴリを追加・変更したい場合は、ここだけ直せば両方に反映されます。
  */
 window.ASTRA_CONFIG = {
   GAMES: [
-    { id: 'genshin', name: '原神',            color: '#6EC6FF' },
-    { id: 'hsr',     name: '崩壊：スターレイル', color: '#243B7A' },
-    { id: 'zzz',     name: 'ゼンレスゾーンゼロ', color: '#FF8A2A' },
-    { id: 'ww',      name: '鳴潮',             color: '#E6B422' },
-    { id: 'nte',     name: 'NTE',             color: '#8B5CF6' },
+    { id: 'genshin', name: '原神',            color: '#6EC6FF', icon: 'assets/games/genshin.svg' },
+    { id: 'hsr',     name: '崩壊：スターレイル', color: '#243B7A', icon: 'assets/games/hsr.svg' },
+    { id: 'zzz',     name: 'ゼンレスゾーンゼロ', color: '#FF8A2A', icon: 'assets/games/zzz.svg' },
+    { id: 'ww',      name: '鳴潮',             color: '#E6B422', icon: 'assets/games/ww.svg' },
+    { id: 'nte',     name: 'NTE',             color: '#8B5CF6', icon: 'assets/games/nte.svg' },
   ],
   CATEGORY_LABEL: {
     character:   '新キャラ',

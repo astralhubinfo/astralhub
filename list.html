@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>一覧 | AstraHub（アストラハブ）</title>
+<title>一覧 | AstralHub（アストラルハブ）</title>
 <link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -68,6 +68,12 @@
   }
   .badge-viewers { position:absolute; top:7px; left:7px; background: rgba(226,61,61,0.92); color:#fff; font-family: var(--font-mono); font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px; display:flex; align-items:center; gap:4px; }
   .badge-duration { position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.72); color:#fff; font-family: var(--font-mono); font-size:10.5px; padding:1px 5px; border-radius:3px; }
+  .game-icon { object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+  .game-icon.icon-md { width: 48px; height: 48px; }
+  .game-icon.icon-sm { max-width: 65%; max-height: 65%; }
+  .game-icon-fallback { color: #fff; font-weight: 900; }
+  .game-icon-fallback.icon-md { font-size: 20px; }
+  .game-icon-fallback.icon-sm { font-size: 15px; }
   .card-tag-row { display:flex; gap:6px; margin: 8px 0 5px; }
   .tag { font-size: 10.5px; font-weight:700; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
@@ -90,7 +96,7 @@
 
 <header class="site-header">
   <div class="header-inner">
-    <div class="logo"><img src="assets/logo.svg" alt="AstraHub"></div>
+    <a class="logo" href="index.html"><img src="assets/logo.svg" alt="AstralHub"></a>
     <a class="back-link" href="index.html">← トップに戻る</a>
   </div>
   <div class="filter-bar-wrap">
