@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>お問い合わせ | AstralHub</title>
+<link rel="icon" href="assets/logo-symbol.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff;
+    --page-bg: #f2f4f7;
+    --surface: #ffffff;
+    --border: #e6e9ee;
+    --text: #12151b;
+    --text-secondary: #6b7280;
+    --text-faint: #9aa1ac;
+    --accent: #2c5ce0;
+    --accent-strong: #1c3fa8;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font-display: 'Noto Sans JP', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--page-bg); color: var(--text); font-family: var(--font-display); font-size: 14px; line-height: 1.7; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+
+  .site-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top:0; z-index: 20; }
+  .header-inner { max-width: 640px; margin: 0 auto; padding: 12px 20px; display:flex; align-items:center; gap: 20px; }
+  .logo img { height: 40px; }
+  .back-link { margin-left:auto; font-size: 13px; font-weight: 500; color: var(--accent); }
+  .back-link:hover { color: var(--accent-strong); }
+
+  .page { max-width: 640px; margin: 0 auto; padding: 28px 20px 60px; }
+  .panel { background: var(--surface); border:1px solid var(--border); border-radius: var(--radius-lg); padding: 28px; }
+  .panel h1 { font-size: 18px; margin: 0 0 6px; }
+  .panel .lead { font-size: 13px; color: var(--text-secondary); margin: 0 0 24px; line-height: 1.7; }
+
+  .field { margin-bottom: 18px; }
+  .field label { display:block; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .field .optional { font-weight: 400; color: var(--text-faint); font-size: 11.5px; margin-left: 4px; }
+  .field textarea, .field input {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  }
+  .field textarea { min-height: 140px; resize: vertical; }
+
+  .submit-btn {
+    width: 100%; background: var(--accent); color:#fff; border:none; border-radius: var(--radius-md);
+    padding: 12px; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .submit-btn:hover { background: var(--accent-strong); }
+  .submit-btn:disabled { background: #c7cedb; cursor: default; }
+
+  .status-msg { margin-top: 14px; font-size: 13px; padding: 10px 12px; border-radius: var(--radius-sm); display:none; }
+  .status-msg.success { display:block; background: #e9f7ef; color: #1f8a4c; }
+  .status-msg.error { display:block; background: #fdecea; color: #c0392b; }
+
+  .setup-note {
+    margin-top: 24px; font-size: 12px; color: var(--text-faint); border-top: 1px solid var(--border);
+    padding-top: 16px; line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="index.html"><img src="assets/logo.svg" alt="AstralHub"></a>
+    <a class="back-link" href="index.html">← トップに戻る</a>
+  </div>
+</header>
+
+<div class="page">
+  <div class="panel">
+    <h1>管理人へのお問い合わせ</h1>
+    <p class="lead">ご意見・ご要望・不具合報告などは、以下のフォームからお送りください。</p>
+
+    <form id="contactForm">
+      <div class="field">
+        <label for="message">お問い合わせ内容</label>
+        <textarea id="message" name="message" required placeholder="内容をご記入ください"></textarea>
+      </div>
+      <div class="field">
+        <label for="contactInfo">連絡先<span class="optional">（任意・返信が必要な場合はメールアドレス等をご記入ください）</span></label>
+        <input type="text" id="contactInfo" name="contactInfo" placeholder="メールアドレスなど">
+      </div>
+      <!-- スパム対策用の隠しフィールド（人間のユーザーには見えない） -->
+      <input type="text" name="_gotcha" style="display:none">
+      <button type="submit" class="submit-btn" id="submitBtn">送信する</button>
+      <div class="status-msg" id="statusMsg"></div>
+    </form>
+
+    <div class="setup-note">
+      ※このフォームは Formspree という無料の外部サービスを使って送信されます。管理人が受信メールを確認する形式のため、送信内容が管理画面（admin.html）に自動反映されるわけではありません。
+    </div>
+  </div>
+</div>
+
+<script>
+// ▼▼▼ 運営者が最初に1回だけ設定する部分 ▼▼▼
+// https://formspree.io で無料アカウントを作成し、発行されたフォームIDを下のURLに入れてください。
+// 例: 'https://formspree.io/f/abcdwxyz'
+const FORMSPREE_ENDPOINT = 'https://formspree.io/f/YOUR_FORM_ID';
+// ▲▲▲ ここまで ▲▲▲
+
+const form = document.getElementById('contactForm');
+const submitBtn = document.getElementById('submitBtn');
+const statusMsg = document.getElementById('statusMsg');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  statusMsg.className = 'status-msg';
+  statusMsg.textContent = '';
+
+  if (FORMSPREE_ENDPOINT.includes('YOUR_FORM_ID')) {
+    statusMsg.className = 'status-msg error';
+    statusMsg.textContent = 'まだ送信先が設定されていません（運営者向け：contact.html内のFORMSPREE_ENDPOINTを設定してください）。';
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = '送信中...';
+
+  try {
+    const res = await fetch(FORMSPREE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: new FormData(form),
+    });
+    if (res.ok) {
+      statusMsg.className = 'status-msg success';
+      statusMsg.textContent = '送信しました。ありがとうございます。';
+      form.reset();
+    } else {
+      throw new Error('送信に失敗しました');
+    }
+  } catch (err) {
+    statusMsg.className = 'status-msg error';
+    statusMsg.textContent = '送信に失敗しました。時間をおいて再度お試しください。';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '送信する';
+  }
+});
+</script>
+</body>
+</html>
