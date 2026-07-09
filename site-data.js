@@ -94,10 +94,13 @@
 
   function liveCardHtml(item){
     const g = gameById(item.game);
+    const thumbInner = item.thumbnail
+      ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
+      : gameIconImgHtml(g, 'icon-md');
     return `<div class="media-card">
       <div class="media-thumb landscape" style="${thumbStyle(g)}">
         <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
-        ${gameIconImgHtml(g, 'icon-md')}
+        ${thumbInner}
       </div>
       <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
       <p class="card-title">${item.title}</p>
@@ -107,10 +110,13 @@
 
   function videoCardHtml(item){
     const g = gameById(item.game);
+    const thumbInner = item.thumbnail
+      ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
+      : gameIconImgHtml(g, 'icon-md');
     return `<div class="media-card">
       <div class="media-thumb landscape" style="${thumbStyle(g)}">
         <span class="badge-duration">${item.duration}</span>
-        ${gameIconImgHtml(g, 'icon-md')}
+        ${thumbInner}
       </div>
       <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
       <p class="card-title">${item.title}</p>
@@ -222,6 +228,7 @@
       game: gameId,
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
+      thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
       viewers: (detail && detail.liveStreamingDetails && detail.liveStreamingDetails.concurrentViewers)
         ? parseInt(detail.liveStreamingDetails.concurrentViewers, 10) : 0,
     };
@@ -233,6 +240,7 @@
       game: gameId,
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
+      thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
       views: (detail && detail.statistics && detail.statistics.viewCount)
         ? parseInt(detail.statistics.viewCount, 10) : 0,
       duration: (detail && detail.contentDetails && detail.contentDetails.duration)
