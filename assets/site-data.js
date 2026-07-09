@@ -177,7 +177,7 @@
   //       保存後は、今まで通り loadList() や liveCardHtml() 等がそのまま使える。
 
   const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
-  const YT_CACHE_MINUTES = 5; // この時間内は再取得しない（APIの上限を節約するため）
+  const YT_CACHE_MINUTES_DEFAULT = 120; // config.js側の設定が無い場合の初期値（分）
 
   async function ytFetchJson(url){
     const res = await fetch(url);
@@ -199,26 +199,58 @@
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
-  // チャンネルの「配信中のLIVE」を検索する
-  async function ytSearchLive(channelId, apiKey){
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`;
+  // キーワードで「配信中のLIVE」を検索する（チャンネル登録が不要な自動取得方式）
+  async function ytSearchLiveByKeyword(keyword, apiKey){
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&eventType=live&type=video&relevanceLanguage=ja&maxResults=10&key=${apiKey}`;
     const data = await ytFetchJson(url);
     return data.items || [];
   }
 
-  // チャンネルの「最近の動画」を新しい順に6件検索する
-  async function ytSearchRecentVideos(channelId, apiKey){
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&order=date&type=video&maxResults=6&key=${apiKey}`;
+  // キーワードで「動画」を新しい順に検索する（チャンネル登録が不要な自動取得方式）
+  async function ytSearchRecentVideosByKeyword(keyword, apiKey){
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&order=date&type=video&relevanceLanguage=ja&maxResults=10&key=${apiKey}`;
     const data = await ytFetchJson(url);
     return data.items || [];
   }
 
-  // 動画IDの一覧から、再生回数・動画の長さ・同時視聴者数などの詳細情報を取得する
+  // 動画IDの一覧から、再生回数・動画の長さ・タグ・同時視聴者数などの詳細情報を取得する
   async function ytFetchVideoDetails(videoIds, apiKey){
     if (videoIds.length === 0) return [];
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics,liveStreamingDetails&id=${videoIds.join(',')}&key=${apiKey}`;
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,liveStreamingDetails&id=${videoIds.join(',')}&key=${apiKey}`;
     const data = await ytFetchJson(url);
     return data.items || [];
+  }
+
+  // タイトル・概要欄に、ひらがな・カタカナがある程度含まれているかで「日本語コンテンツか」を簡易判定する
+  function ytIsJapaneseText(text){
+    if (!text) return false;
+    const kana = text.match(/[\u3040-\u30FF]/g); // ひらがな・カタカナの範囲
+    return !!kana && kana.length >= 3;
+  }
+
+  // 投稿者が動画に付けた「タグ」に、対象ゲームのキーワードが含まれているかを確認する
+  function ytMatchesGameTag(detail, keyword){
+    const tags = (detail && detail.snippet && Array.isArray(detail.snippet.tags)) ? detail.snippet.tags : [];
+    return tags.some(t => t.toLowerCase().includes(keyword.toLowerCase()) || keyword.toLowerCase().includes(t.toLowerCase()));
+  }
+
+  // 「対象ゲームの動画らしいか」＋「日本語コンテンツか」の両方を満たすかチェックする
+  // タグにゲーム名があればOK。タグが無い投稿者もいるため、タイトル・概要欄にキーワードが含まれる場合も許可する
+  function ytPassesContentFilter(searchItem, detail, keyword){
+    const title = (searchItem.snippet && searchItem.snippet.title) || '';
+    const desc = (searchItem.snippet && searchItem.snippet.description) || '';
+    const japaneseOk = ytIsJapaneseText(title + desc);
+    const relevanceOk = ytMatchesGameTag(detail, keyword) || title.includes(keyword) || desc.includes(keyword);
+    return japaneseOk && relevanceOk;
+  }
+
+  // 60秒以下の動画は「ショート動画」とみなし、ノイズとして除外する
+  function ytIsShort(detail){
+    const iso = detail && detail.contentDetails && detail.contentDetails.duration;
+    if (!iso) return false;
+    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
+    const totalSeconds = (parseInt(m[1]||'0',10) * 3600) + (parseInt(m[2]||'0',10) * 60) + parseInt(m[3]||'0',10);
+    return totalSeconds > 0 && totalSeconds <= 60;
   }
 
   // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
@@ -249,11 +281,13 @@
     };
   }
 
-  // config.js に登録された全チャンネル分、YouTubeからデータを取得してlocalStorageに保存する
+  // config.js に登録された全キーワード分、YouTubeからデータを検索・取得してlocalStorageに保存する
+  // 「ショート動画」は除外し、「日本語コンテンツらしいもの」だけを残す
   // index.html / list.html の読み込み時に1回呼び出す想定
   async function refreshYouTubeData(){
     const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
-    const channels = window.ASTRA_CONFIG.YOUTUBE_CHANNELS || [];
+    const keywordList = window.ASTRA_CONFIG.YOUTUBE_SEARCH_KEYWORDS || [];
+    const cacheMinutes = window.ASTRA_CONFIG.YT_CACHE_MINUTES || YT_CACHE_MINUTES_DEFAULT;
 
     if (!apiKey || apiKey.indexOf('ここに') === 0) {
       console.warn('[AstralHub] YouTube APIキーが未設定のため、自動取得はスキップされました。');
@@ -262,26 +296,36 @@
 
     // 前回の取得から一定時間が経っていなければ何もしない（APIの上限を使い切らないため）
     const lastFetch = parseInt(localStorage.getItem(YT_LAST_FETCH_KEY) || '0', 10);
-    if (Date.now() - lastFetch < YT_CACHE_MINUTES * 60000) return false;
+    if (Date.now() - lastFetch < cacheMinutes * 60000) return false;
 
     const allLive = [];
     const allVideos = [];
 
-    for (const ch of channels) {
+    for (const entry of keywordList) {
       try {
         const [liveItems, videoItems] = await Promise.all([
-          ytSearchLive(ch.channelId, apiKey),
-          ytSearchRecentVideos(ch.channelId, apiKey),
+          ytSearchLiveByKeyword(entry.keyword, apiKey),
+          ytSearchRecentVideosByKeyword(entry.keyword, apiKey),
         ]);
 
         const videoIds = [...liveItems, ...videoItems].map(i => i.id.videoId);
         const details = await ytFetchVideoDetails(videoIds, apiKey);
         const detailById = new Map(details.map(d => [d.id, d]));
 
-        liveItems.forEach(item => allLive.push(ytBuildLiveItem(ch.gameId, item, detailById.get(item.id.videoId))));
-        videoItems.forEach(item => allVideos.push(ytBuildVideoItem(ch.gameId, item, detailById.get(item.id.videoId))));
+        liveItems.forEach(item => {
+          const detail = detailById.get(item.id.videoId);
+          if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
+          allLive.push(ytBuildLiveItem(entry.gameId, item, detail));
+        });
+
+        videoItems.forEach(item => {
+          const detail = detailById.get(item.id.videoId);
+          if (ytIsShort(detail)) return; // ショート動画は除外
+          if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
+          allVideos.push(ytBuildVideoItem(entry.gameId, item, detail));
+        });
       } catch (e) {
-        console.error('[AstralHub] YouTubeデータの取得に失敗しました（チャンネル: ' + ch.channelId + '）', e);
+        console.error('[AstralHub] YouTubeデータの取得に失敗しました（キーワード: ' + entry.keyword + '）', e);
       }
     }
 
@@ -295,6 +339,17 @@
       return false;
     }
   }
+
+  // 「最終更新はいつか」「何分ごとに更新されるか」をHTML側で表示するための情報を返す
+  function getYoutubeUpdateInfo(){
+    const cacheMinutes = (window.ASTRA_CONFIG && window.ASTRA_CONFIG.YT_CACHE_MINUTES) || YT_CACHE_MINUTES_DEFAULT;
+    let lastFetchAt = null;
+    try {
+      const v = localStorage.getItem(YT_LAST_FETCH_KEY);
+      lastFetchAt = v ? parseInt(v, 10) : null;
+    } catch (e) { /* 無視 */ }
+    return { lastFetchAt, cacheMinutes };
+  }
   // ▲ここまで追加 ============================================
 
   window.ASTRA_DATA = {
@@ -302,6 +357,6 @@
     gameById, timeAgoLabel, thumbStyle, emptyHtml,
     liveCardHtml, videoCardHtml, newsItemHtml,
     getFilteredData, findNewsById,
-    refreshYouTubeData,
+    refreshYouTubeData, getYoutubeUpdateInfo,
   };
 })();

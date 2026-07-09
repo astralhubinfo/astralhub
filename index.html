@@ -139,6 +139,7 @@
   }
   .panel-title .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
   .panel-more { font-size: 12px; color: var(--accent); font-weight: 500; }
+  .update-note { font-size: 11px; color: var(--text-faint); margin: 0 0 12px; }
 
   .pill-tabs { display: flex; gap: 6px; }
   .pill-tab {
@@ -343,7 +344,7 @@ const {
   loadJapaneseOnly, saveJapaneseOnly,
   gameById, timeAgoLabel, emptyHtml,
   liveCardHtml, videoCardHtml, newsItemHtml,
-  getFilteredData, refreshYouTubeData,
+  getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -370,6 +371,14 @@ let mobileTab = 'main';
 /* =========================================================
    3. 描画
    ========================================================= */
+// LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度・最終更新時刻の注釈を出す
+function updateNoteHtml(){
+  const { lastFetchAt, cacheMinutes } = getYoutubeUpdateInfo();
+  const hourLabel = cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間` : `${cacheMinutes}分`;
+  const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
+  return `<p class="update-note">🔄 ${hourLabel}ごとに自動更新（最終更新：${lastLabel}）</p>`;
+}
+
 function renderFilterBar(){
   const allActive = activeGames.size === GAMES.length;
   let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
@@ -400,6 +409,7 @@ function liveSectionHtml(list){
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
       <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
     </div>
+    ${updateNoteHtml()}
     <div class="card-grid">${list.length ? list.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>
   </div>`;
 }
@@ -411,6 +421,7 @@ function popularSectionHtml(list){
       <span class="panel-title">人気動画</span>
       <a class="panel-more" href="list.html?type=popular">もっと見る ›</a>
     </div>
+    ${updateNoteHtml()}
     <div class="pill-tabs" style="margin-bottom:14px;">
       <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
@@ -427,6 +438,7 @@ function latestSectionHtml(list){
       <span class="panel-title">新着動画</span>
       <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
+    ${updateNoteHtml()}
     <div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>
   </div>`;
 }

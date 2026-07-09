@@ -4,14 +4,21 @@
  * ゲームやカテゴリを追加・変更したい場合は、ここだけ直せば両方に反映されます。
  */
 window.ASTRA_CONFIG = {
-  // ▼ここから追加：YouTube API連携用の設定
+  // ▼ここから追加：YouTube自動取得（キーワード検索方式）の設定
   YOUTUBE_API_KEY: 'AIzaSyAN1XbEGMo432SB8Df_6r7UCRbhOgJhPLA',
 
-  // ゲームごとに「どのYouTubeチャンネルから取得するか」を紐づける表
-  // チャンネルを増やしたい場合は、この中に { id:'ゲームid', channelId:'UCから始まる文字列' } を追加するだけでOK
-  YOUTUBE_CHANNELS: [
-    { gameId: 'genshin', channelId: 'UCAVR6Q0YgYa8xwz8rdg9Mrg' }, // 原神-Genshin-公式（@Genshin_JP）
+  // ゲームごとに「検索に使うキーワード」を設定。この言葉でYouTube動画を検索します。
+  // ゲームを増やしたい場合は、この中に { gameId:'ゲームid', keyword:'検索したい言葉' } を追加するだけでOK
+  YOUTUBE_SEARCH_KEYWORDS: [
+    { gameId: 'genshin', keyword: '原神' },
+    { gameId: 'hsr',     keyword: '崩壊：スターレイル' },
+    { gameId: 'zzz',     keyword: 'ゼンレスゾーンゼロ' },
+    { gameId: 'ww',      keyword: '鳴潮' },
+    { gameId: 'nte',     keyword: 'NTE' },
   ],
+
+  // 新しい動画をチェックする頻度（分単位）。2時間ごと = 120
+  YT_CACHE_MINUTES: 120,
   // ▲ここまで追加
 
   GAMES: [
