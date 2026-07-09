@@ -322,13 +322,6 @@
   <h3>表示順を並び替える</h3>
   <p class="order-hint">▲▼で好きな順番に変更できます（自動的に保存されます）</p>
   <div id="settingsRows"></div>
-
-  <h3 style="margin-top:20px;">表示するコンテンツの言語</h3>
-  <label class="filter-row" style="border:none; padding:6px 0;">
-    <input type="checkbox" id="japaneseOnlyCheckbox">
-    日本語の配信・動画のみ表示する
-  </label>
-  <p class="order-hint">チャンネル管理台帳で「言語：日本語」と登録されているチャンネルのみ表示します。未登録のチャンネルは、この設定をONにすると表示されなくなります。</p>
 </div>
 
 <script src="assets/config.js"></script>
@@ -341,7 +334,6 @@
    ========================================================= */
 const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CONFIG;
 const {
-  loadJapaneseOnly, saveJapaneseOnly,
   gameById, timeAgoLabel, emptyHtml,
   liveCardHtml, videoCardHtml, newsItemHtml,
   getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo,
@@ -351,7 +343,6 @@ const {
    2. 状態
    ========================================================= */
 let activeGames = new Set(GAMES.map(g => g.id));
-let japaneseOnlyEnabled = loadJapaneseOnly();
 let popularRange = '24'; // 24 | 7 | 30
 
 function loadSectionOrderList(){
@@ -445,7 +436,7 @@ function latestSectionHtml(list){
 
 function renderMainContent(){
   const el = document.getElementById('mainContent');
-  const { live: fLive, videos: fVideos } = getFilteredData(activeGames, japaneseOnlyEnabled);
+  const { live: fLive, videos: fVideos } = getFilteredData(activeGames, true);
 
   const blocks = {
     live: liveSectionHtml(fLive),
@@ -460,7 +451,7 @@ function renderMainContent(){
 }
 
 function renderSidebar(){
-  const { news } = getFilteredData(activeGames, japaneseOnlyEnabled);
+  const { news } = getFilteredData(activeGames, true);
   const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
   document.getElementById('sidebarNews').innerHTML =
     filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
@@ -468,7 +459,7 @@ function renderSidebar(){
 
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
-    const { news } = getFilteredData(activeGames, japaneseOnlyEnabled);
+    const { news } = getFilteredData(activeGames, true);
     const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     document.getElementById('mainContent').innerHTML =
       `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>
@@ -533,14 +524,8 @@ document.getElementById('panelBackdrop').addEventListener('click', closeSettings
 document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
 document.getElementById('settingsOpenBtn').addEventListener('click', () => {
   renderSettingsRows();
-  document.getElementById('japaneseOnlyCheckbox').checked = japaneseOnlyEnabled;
   document.getElementById('settingsPanel').style.display = 'block';
   document.getElementById('panelBackdrop').style.display = 'block';
-});
-document.getElementById('japaneseOnlyCheckbox').addEventListener('change', (e) => {
-  japaneseOnlyEnabled = e.target.checked;
-  saveJapaneseOnly(japaneseOnlyEnabled);
-  renderMainContent();
 });
 
 /* =========================================================

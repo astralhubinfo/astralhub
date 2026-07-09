@@ -97,11 +97,13 @@
     const thumbInner = item.thumbnail
       ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
       : gameIconImgHtml(g, 'icon-md');
+    const thumbTag = item.url ? 'a' : 'div';
+    const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
     return `<div class="media-card">
-      <div class="media-thumb landscape" style="${thumbStyle(g)}">
+      <${thumbTag} class="media-thumb landscape" style="${thumbStyle(g)}"${thumbLinkAttrs}>
         <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
         ${thumbInner}
-      </div>
+      </${thumbTag}>
       <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span></div>
@@ -113,11 +115,13 @@
     const thumbInner = item.thumbnail
       ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
       : gameIconImgHtml(g, 'icon-md');
+    const thumbTag = item.url ? 'a' : 'div';
+    const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
     return `<div class="media-card">
-      <div class="media-thumb landscape" style="${thumbStyle(g)}">
+      <${thumbTag} class="media-thumb landscape" style="${thumbStyle(g)}"${thumbLinkAttrs}>
         <span class="badge-duration">${item.duration}</span>
         ${thumbInner}
-      </div>
+      </${thumbTag}>
       <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
@@ -247,22 +251,49 @@
     return japaneseOk && relevanceOk;
   }
 
-  // 60秒以下の動画は「ショート動画」とみなし、ノイズとして除外する
+  // サムネイルの縦横サイズを取得する（アスペクト比の判定に使う）
+  function ytGetThumbSize(detail){
+    const thumbs = detail && detail.snippet && detail.snippet.thumbnails;
+    const t = thumbs && (thumbs.maxres || thumbs.high || thumbs.medium || thumbs.default);
+    return (t && t.width && t.height) ? { width: t.width, height: t.height } : null;
+  }
+
+  // YouTubeショートの判定：現在の仕様（2024年10月〜）では「3分以内」かつ「縦長 or 正方形」の動画がショート扱いになる
+  // サムネイルの縦横サイズが取得できない場合は、安全側に「60秒以下」のみショートとみなす
   function ytIsShort(detail){
     const iso = detail && detail.contentDetails && detail.contentDetails.duration;
     if (!iso) return false;
     const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
     const totalSeconds = (parseInt(m[1]||'0',10) * 3600) + (parseInt(m[2]||'0',10) * 60) + parseInt(m[3]||'0',10);
-    return totalSeconds > 0 && totalSeconds <= 60;
+    if (totalSeconds <= 0 || totalSeconds > 180) return false; // 3分を超えるものは通常動画
+
+    const size = ytGetThumbSize(detail);
+    if (size) return size.height >= size.width; // 縦長・正方形ならショート
+
+    return totalSeconds <= 60;
+  }
+
+  // 「配信中」かどうかは、検索条件（eventType=live）だけでなく、動画詳細のliveBroadcastContentでも確認する
+  // （プレミア公開など、検索上は"live"扱いでも実際は配信ではない動画を除外するため）
+  function ytIsCurrentlyLive(detail){
+    return !!(detail && detail.snippet && detail.snippet.liveBroadcastContent === 'live');
+  }
+
+  // 過去に配信されたアーカイブ（配信が終わったもの）かどうかを判定する
+  // liveStreamingDetailsは「配信（今もこれからも含む）だった動画」に必ず付くため、これがあれば配信系とみなす
+  function ytIsBroadcastVideo(detail){
+    return !!(detail && detail.liveStreamingDetails);
   }
 
   // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
   // source: 'youtube-auto' は「自動取得したデータで、取得時に日本語チェック済み」の目印
+  // url: サムネイルクリックで実際の動画へ飛べるようにするためのリンク先
   function ytBuildLiveItem(gameId, snippetItem, detail){
     return {
       id: snippetItem.id.videoId,
       game: gameId,
       source: 'youtube-auto',
+      url: 'https://www.youtube.com/watch?v=' + snippetItem.id.videoId,
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
       thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
@@ -276,6 +307,7 @@
       id: snippetItem.id.videoId,
       game: gameId,
       source: 'youtube-auto',
+      url: 'https://www.youtube.com/watch?v=' + snippetItem.id.videoId,
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
       thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
@@ -320,12 +352,14 @@
 
         liveItems.forEach(item => {
           const detail = detailById.get(item.id.videoId);
+          if (!ytIsCurrentlyLive(detail)) return; // 検索結果の"live"は不正確な場合があるため、詳細情報で再確認する
           if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
           allLive.push(ytBuildLiveItem(entry.gameId, item, detail));
         });
 
         videoItems.forEach(item => {
           const detail = detailById.get(item.id.videoId);
+          if (ytIsBroadcastVideo(detail)) return; // 配信中・配信アーカイブは「動画」欄に載せない
           if (ytIsShort(detail)) return; // ショート動画は除外
           if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
           allVideos.push(ytBuildVideoItem(entry.gameId, item, detail));

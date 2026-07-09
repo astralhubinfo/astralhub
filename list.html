@@ -117,11 +117,10 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, emptyHtml, getFilteredData, loadJapaneseOnly, getYoutubeUpdateInfo } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, emptyHtml, getFilteredData, getYoutubeUpdateInfo } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
-const japaneseOnlyEnabled = loadJapaneseOnly();
 
 const TITLES = {
   live: 'LIVE配信 一覧',
@@ -160,7 +159,7 @@ function renderFilterBar(){
 }
 
 function renderContent(){
-  const { news, live, videos } = getFilteredData(activeGames, japaneseOnlyEnabled);
+  const { news, live, videos } = getFilteredData(activeGames, true);
   const el = document.getElementById('listContent');
   const subTabsEl = document.getElementById('subTabs');
 
