@@ -4,6 +4,16 @@
  * ゲームやカテゴリを追加・変更したい場合は、ここだけ直せば両方に反映されます。
  */
 window.ASTRA_CONFIG = {
+  // ▼ここから追加：YouTube API連携用の設定
+  YOUTUBE_API_KEY: 'AIzaSyAN1XbEGMo432SB8Df_6r7UCRbhOgJhPLA',
+
+  // ゲームごとに「どのYouTubeチャンネルから取得するか」を紐づける表
+  // チャンネルを増やしたい場合は、この中に { id:'ゲームid', channelId:'UCから始まる文字列' } を追加するだけでOK
+  YOUTUBE_CHANNELS: [
+    { gameId: 'genshin', channelId: 'UCAVR6Q0YgYa8xwz8rdg9Mrg' }, // 原神-Genshin-公式（@Genshin_JP）
+  ],
+  // ▲ここまで追加
+
   GAMES: [
     { id: 'genshin', name: '原神',            color: '#6EC6FF', icon: 'assets/games/genshin.svg' },
     { id: 'hsr',     name: '崩壊：スターレイル', color: '#243B7A', icon: 'assets/games/hsr.svg' },
