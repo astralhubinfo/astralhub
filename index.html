@@ -478,7 +478,7 @@ renderAll();
    2. その裏でYouTubeに問い合わせに行く
    3. 取得できたら、画面をYouTubeのデータで再表示する
    ================================================================== */
-refreshYouTubeData().then(updated => {
+ASTRA_DATA.refreshYouTubeData().then(updated => {
   if (updated) renderAll();
 }).catch(e => {
   console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
