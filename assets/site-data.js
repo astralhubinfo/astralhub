@@ -151,17 +151,20 @@
     const blocked = new Set(ledger.filter(c => c.blocked === 'block').map(c => c.channel));
     const language = new Map(ledger.map(c => [c.channel, c.language]));
 
-    function passesChannelRules(channelName){
-      if (blocked.has(channelName)) return false;
-      if (japaneseOnlyEnabled && language.get(channelName) !== 'ja') return false;
+    function passesChannelRules(item){
+      if (blocked.has(item.channel)) return false; // 管理画面での「ブロック」設定は、取得方法に関わらず常に有効
+      // 自動取得（キーワード検索）したデータは、取得の時点ですでに日本語チェック済みなので、
+      // 管理画面の台帳（手動登録チャンネル用）による日本語判定は行わない
+      if (item.source === 'youtube-auto') return true;
+      if (japaneseOnlyEnabled && language.get(item.channel) !== 'ja') return false;
       return true;
     }
 
     const activeSet = new Set(activeGameIds);
     return {
       news: news.filter(n => activeSet.has(n.game)),
-      live: live.filter(v => activeSet.has(v.game) && passesChannelRules(v.channel)),
-      videos: videos.filter(v => activeSet.has(v.game) && passesChannelRules(v.channel)),
+      live: live.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
+      videos: videos.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
     };
   }
 
@@ -254,10 +257,12 @@
   }
 
   // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
+  // source: 'youtube-auto' は「自動取得したデータで、取得時に日本語チェック済み」の目印
   function ytBuildLiveItem(gameId, snippetItem, detail){
     return {
       id: snippetItem.id.videoId,
       game: gameId,
+      source: 'youtube-auto',
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
       thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
@@ -270,6 +275,7 @@
     return {
       id: snippetItem.id.videoId,
       game: gameId,
+      source: 'youtube-auto',
       title: snippetItem.snippet.title,
       channel: snippetItem.snippet.channelTitle,
       thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
