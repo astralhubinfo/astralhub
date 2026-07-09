@@ -342,7 +342,7 @@ const {
   loadJapaneseOnly, saveJapaneseOnly,
   gameById, timeAgoLabel, emptyHtml,
   liveCardHtml, videoCardHtml, newsItemHtml,
-  getFilteredData,
+  getFilteredData, refreshYouTubeData,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -472,6 +472,18 @@ function renderAll(){
   renderSidebar();
 }
 renderAll();
+
+/* ▼ここから追加：YouTubeからLIVE・動画データを自動取得する ===========
+   1. まず今までのやり方（サンプル or 管理画面登録データ）で画面を表示（上のrenderAll()）
+   2. その裏でYouTubeに問い合わせに行く
+   3. 取得できたら、画面をYouTubeのデータで再表示する
+   ================================================================== */
+refreshYouTubeData().then(updated => {
+  if (updated) renderAll();
+}).catch(e => {
+  console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
+});
+/* ▲ここまで追加 ====================================================== */
 
 /* =========================================================
    4. 設定パネル
