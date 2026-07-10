@@ -363,11 +363,15 @@ let mobileTab = 'main';
    3. 描画
    ========================================================= */
 // LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度・最終更新時刻の注釈を出す
-function updateNoteHtml(){
-  const { lastFetchAt, cacheMinutes } = getYoutubeUpdateInfo();
-  const hourLabel = cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間` : `${cacheMinutes}分`;
+// kind: 'live'（配信）は基本リアルタイム、'video'（人気・新着動画）は数分キャッシュ、と表示を分ける
+function updateNoteHtml(kind){
+  const { lastFetchAt, liveCacheMinutes, videoCacheMinutes } = getYoutubeUpdateInfo();
+  const cacheMinutes = kind === 'live' ? liveCacheMinutes : videoCacheMinutes;
+  const freshLabel = cacheMinutes === 0
+    ? 'リアルタイム更新'
+    : (cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間ごとに更新` : `${cacheMinutes}分ごとに更新`);
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  return `<p class="update-note">🔄 ${hourLabel}ごとに自動更新（最終更新：${lastLabel}）</p>`;
+  return `<p class="update-note">🔄 ${freshLabel}（最終更新：${lastLabel}）</p>`;
 }
 
 function renderFilterBar(){
@@ -400,7 +404,7 @@ function liveSectionHtml(list){
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
       <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
     </div>
-    ${updateNoteHtml()}
+    ${updateNoteHtml('live')}
     <div class="card-grid">${list.length ? list.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>
   </div>`;
 }
@@ -412,7 +416,7 @@ function popularSectionHtml(list){
       <span class="panel-title">人気動画</span>
       <a class="panel-more" href="list.html?type=popular">もっと見る ›</a>
     </div>
-    ${updateNoteHtml()}
+    ${updateNoteHtml('video')}
     <div class="pill-tabs" style="margin-bottom:14px;">
       <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
@@ -429,14 +433,14 @@ function latestSectionHtml(list){
       <span class="panel-title">新着動画</span>
       <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
-    ${updateNoteHtml()}
+    ${updateNoteHtml('video')}
     <div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>
   </div>`;
 }
 
 function renderMainContent(){
   const el = document.getElementById('mainContent');
-  const { live: fLive, videos: fVideos } = getFilteredData(activeGames, true);
+  const { live: fLive, videos: fVideos } = getFilteredData(activeGames);
 
   const blocks = {
     live: liveSectionHtml(fLive),
@@ -451,7 +455,7 @@ function renderMainContent(){
 }
 
 function renderSidebar(){
-  const { news } = getFilteredData(activeGames, true);
+  const { news } = getFilteredData(activeGames);
   const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
   document.getElementById('sidebarNews').innerHTML =
     filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
@@ -459,7 +463,7 @@ function renderSidebar(){
 
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
-    const { news } = getFilteredData(activeGames, true);
+    const { news } = getFilteredData(activeGames);
     const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     document.getElementById('mainContent').innerHTML =
       `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>

@@ -159,7 +159,7 @@ function renderFilterBar(){
 }
 
 function renderContent(){
-  const { news, live, videos } = getFilteredData(activeGames, true);
+  const { news, live, videos } = getFilteredData(activeGames);
   const el = document.getElementById('listContent');
   const subTabsEl = document.getElementById('subTabs');
 
@@ -223,10 +223,13 @@ function newsItemWithSummaryHtml(item){
 function renderUpdateNote(){
   const noteEl = document.getElementById('updateNote');
   if (type !== 'live' && type !== 'latest' && type !== 'popular') { noteEl.textContent = ''; return; }
-  const { lastFetchAt, cacheMinutes } = getYoutubeUpdateInfo();
-  const hourLabel = cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間` : `${cacheMinutes}分`;
+  const { lastFetchAt, liveCacheMinutes, videoCacheMinutes } = getYoutubeUpdateInfo();
+  const cacheMinutes = type === 'live' ? liveCacheMinutes : videoCacheMinutes;
+  const freshLabel = cacheMinutes === 0
+    ? 'リアルタイム更新'
+    : (cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間ごとに更新` : `${cacheMinutes}分ごとに更新`);
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  noteEl.textContent = `🔄 ${hourLabel}ごとに自動更新（最終更新：${lastLabel}）`;
+  noteEl.textContent = `🔄 ${freshLabel}（最終更新：${lastLabel}）`;
 }
 
 function renderAll(){
@@ -235,6 +238,16 @@ function renderAll(){
   renderUpdateNote();
 }
 renderAll();
+
+// list.htmlに直接アクセスされた場合（index.htmlを経由していない場合）でも、
+// LIVE・動画データが最新の状態になるよう、ここでも自動取得を行う
+if (window.ASTRA_DATA.refreshYouTubeData) {
+  window.ASTRA_DATA.refreshYouTubeData().then(updated => {
+    if (updated) renderAll();
+  }).catch(e => {
+    console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
+  });
+}
 </script>
 </body>
 </html>

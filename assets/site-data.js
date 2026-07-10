@@ -57,18 +57,6 @@
     } catch (e) { return []; }
   }
 
-  // 「日本語のみ表示」の初期値はON。一度でも設定を変更すると、その選択が保存され尊重される。
-  function loadJapaneseOnly(){
-    try {
-      const v = localStorage.getItem(STORAGE_KEYS.japaneseOnly);
-      if (v === null) return true;
-      return v === '1';
-    } catch (e) { return true; }
-  }
-  function saveJapaneseOnly(v){
-    try { localStorage.setItem(STORAGE_KEYS.japaneseOnly, v ? '1' : '0'); } catch (e) { /* 無視 */ }
-  }
-
   function gameById(id){ return window.ASTRA_CONFIG.GAMES.find(g => g.id === id); }
 
   function timeAgoLabel(publishedAt){
@@ -147,20 +135,20 @@
     return `<div class="news-item">${inner}</div>`;
   }
 
-  function getFilteredData(activeGameIds, japaneseOnlyEnabled){
+  // 管理画面（admin.html）の「チャンネル台帳」で"blocked"に設定されたチャンネルを除外する。
+  // 自動取得（youtube-auto）データには channelId が入っているので、原則こちらで厳密に一致させる。
+  // 手動で登録した古いデータ（channelIdを持たない）は、念のためチャンネル名でも一致を見る。
+  function getFilteredData(activeGameIds){
     const news = loadList(STORAGE_KEYS.news, SAMPLE_NEWS);
     const live = loadList(STORAGE_KEYS.live, SAMPLE_LIVE);
     const videos = loadList(STORAGE_KEYS.videos, SAMPLE_VIDEOS);
     const ledger = loadChannelLedger();
-    const blocked = new Set(ledger.filter(c => c.blocked === 'block').map(c => c.channel));
-    const language = new Map(ledger.map(c => [c.channel, c.language]));
+    const blockedIds = new Set(ledger.filter(c => c.blocked === 'block' && c.channelId).map(c => c.channelId));
+    const blockedNames = new Set(ledger.filter(c => c.blocked === 'block' && !c.channelId).map(c => c.channel));
 
     function passesChannelRules(item){
-      if (blocked.has(item.channel)) return false; // 管理画面での「ブロック」設定は、取得方法に関わらず常に有効
-      // 自動取得（キーワード検索）したデータは、取得の時点ですでに日本語チェック済みなので、
-      // 管理画面の台帳（手動登録チャンネル用）による日本語判定は行わない
-      if (item.source === 'youtube-auto') return true;
-      if (japaneseOnlyEnabled && language.get(item.channel) !== 'ja') return false;
+      if (item.channelId && blockedIds.has(item.channelId)) return false;
+      if (blockedNames.has(item.channel)) return false;
       return true;
     }
 
@@ -178,13 +166,14 @@
     return news.find(n => n.id === id) || null;
   }
 
-  // ▼ここから追加：YouTube自動取得機能 ============================================
-  // 役割：config.js に登録されたチャンネルから、YouTubeの「配信中LIVE」と「最近の動画」を
-  //       取得し、既存のSTORAGE_KEYS.live / STORAGE_KEYS.videos にそのまま保存する。
-  //       保存後は、今まで通り loadList() や liveCardHtml() 等がそのまま使える。
+  // ▼ここから追加：YouTube自動取得機能（チャンネル指定方式） ============================================
+  // 役割：config.js の YOUTUBE_CHANNELS に登録されたチャンネルひとつひとつについて、
+  //       「アップロード一覧（Playlists API）」→「動画の詳細（Videos API）」の順で確認し、
+  //       LIVE配信中のものと、通常の動画（ショート・アーカイブを除く）を仕分けて
+  //       STORAGE_KEYS.live / STORAGE_KEYS.videos に保存する。
+  //       ※ Search API（消費が激しい「検索」）は一切使わないため、API消費を大幅に抑えられる。
 
   const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
-  const YT_CACHE_MINUTES_DEFAULT = 120; // config.js側の設定が無い場合の初期値（分）
 
   async function ytFetchJson(url){
     const res = await fetch(url);
@@ -195,7 +184,20 @@
     return res.json();
   }
 
-  // ISO8601形式の動画時間（例: "PT4M13S"）を "4:13" のような表示用の文字列に変換する
+  // 配列を指定した個数ずつのグループに分割する（YouTube APIは一度に最大50件までしか指定できないため）
+  function chunkArray(arr, size){
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  }
+
+  // ISO8601形式の動画時間（例: "PT4M13S"）を秒数に変換する
+  function ytDurationToSeconds(iso){
+    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
+    return (parseInt(m[1]||'0',10) * 3600) + (parseInt(m[2]||'0',10) * 60) + parseInt(m[3]||'0',10);
+  }
+
+  // ISO8601形式の動画時間を "4:13" のような表示用の文字列に変換する
   function ytFormatDuration(iso){
     const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
     const h = parseInt(m[1] || '0', 10);
@@ -206,49 +208,38 @@
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
-  // キーワードで「配信中のLIVE」を検索する（チャンネル登録が不要な自動取得方式）
-  async function ytSearchLiveByKeyword(keyword, apiKey){
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&eventType=live&type=video&relevanceLanguage=ja&maxResults=10&key=${apiKey}`;
+  // 登録された各チャンネルの「アップロード一覧プレイリストID」をまとめて取得する（channels.list、最大50件ずつ）
+  // これを使うことで、チャンネルごとに個別リクエストを送るより消費を抑えられる
+  async function ytFetchUploadsPlaylistIds(channelIds, apiKey){
+    const map = new Map(); // channelId -> uploadsPlaylistId
+    for (const chunk of chunkArray(channelIds, 50)) {
+      const url = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${chunk.join(',')}&key=${apiKey}`;
+      const data = await ytFetchJson(url);
+      (data.items || []).forEach(ch => {
+        const uploads = ch.contentDetails && ch.contentDetails.relatedPlaylists && ch.contentDetails.relatedPlaylists.uploads;
+        if (uploads) map.set(ch.id, uploads);
+      });
+    }
+    return map;
+  }
+
+  // 指定したプレイリスト（＝あるチャンネルのアップロード一覧）から、最新の動画を取得する
+  async function ytFetchPlaylistItems(playlistId, apiKey, maxResults){
+    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${maxResults || 5}&key=${apiKey}`;
     const data = await ytFetchJson(url);
     return data.items || [];
   }
 
-  // キーワードで「動画」を新しい順に検索する（チャンネル登録が不要な自動取得方式）
-  async function ytSearchRecentVideosByKeyword(keyword, apiKey){
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&order=date&type=video&relevanceLanguage=ja&maxResults=10&key=${apiKey}`;
-    const data = await ytFetchJson(url);
-    return data.items || [];
-  }
-
-  // 動画IDの一覧から、再生回数・動画の長さ・タグ・同時視聴者数などの詳細情報を取得する
+  // 動画IDの一覧から、再生回数・動画の長さ・同時視聴者数・LIVE状態などの詳細情報をまとめて取得する（最大50件ずつ）
   async function ytFetchVideoDetails(videoIds, apiKey){
     if (videoIds.length === 0) return [];
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,liveStreamingDetails&id=${videoIds.join(',')}&key=${apiKey}`;
-    const data = await ytFetchJson(url);
-    return data.items || [];
-  }
-
-  // タイトル・概要欄に、ひらがな・カタカナがある程度含まれているかで「日本語コンテンツか」を簡易判定する
-  function ytIsJapaneseText(text){
-    if (!text) return false;
-    const kana = text.match(/[\u3040-\u30FF]/g); // ひらがな・カタカナの範囲
-    return !!kana && kana.length >= 3;
-  }
-
-  // 投稿者が動画に付けた「タグ」に、対象ゲームのキーワードが含まれているかを確認する
-  function ytMatchesGameTag(detail, keyword){
-    const tags = (detail && detail.snippet && Array.isArray(detail.snippet.tags)) ? detail.snippet.tags : [];
-    return tags.some(t => t.toLowerCase().includes(keyword.toLowerCase()) || keyword.toLowerCase().includes(t.toLowerCase()));
-  }
-
-  // 「対象ゲームの動画らしいか」＋「日本語コンテンツか」の両方を満たすかチェックする
-  // タグにゲーム名があればOK。タグが無い投稿者もいるため、タイトル・概要欄にキーワードが含まれる場合も許可する
-  function ytPassesContentFilter(searchItem, detail, keyword){
-    const title = (searchItem.snippet && searchItem.snippet.title) || '';
-    const desc = (searchItem.snippet && searchItem.snippet.description) || '';
-    const japaneseOk = ytIsJapaneseText(title + desc);
-    const relevanceOk = ytMatchesGameTag(detail, keyword) || title.includes(keyword) || desc.includes(keyword);
-    return japaneseOk && relevanceOk;
+    const all = [];
+    for (const chunk of chunkArray(videoIds, 50)) {
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,liveStreamingDetails&id=${chunk.join(',')}&key=${apiKey}`;
+      const data = await ytFetchJson(url);
+      all.push(...(data.items || []));
+    }
+    return all;
   }
 
   // サムネイルの縦横サイズを取得する（アスペクト比の判定に使う）
@@ -258,14 +249,15 @@
     return (t && t.width && t.height) ? { width: t.width, height: t.height } : null;
   }
 
-  // YouTubeショートの判定：現在の仕様（2024年10月〜）では「3分以内」かつ「縦長 or 正方形」の動画がショート扱いになる
-  // サムネイルの縦横サイズが取得できない場合は、安全側に「60秒以下」のみショートとみなす
+  // YouTubeショートの判定：config.js の SHORTS_FILTER.MAX_DURATION_SECONDS（既定3分）以下で、
+  // かつ縦長・正方形の動画をショート扱いとする。サムネイルの縦横が取得できない場合は60秒以下のみ対象とする（安全側）
   function ytIsShort(detail){
     const iso = detail && detail.contentDetails && detail.contentDetails.duration;
     if (!iso) return false;
-    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
-    const totalSeconds = (parseInt(m[1]||'0',10) * 3600) + (parseInt(m[2]||'0',10) * 60) + parseInt(m[3]||'0',10);
-    if (totalSeconds <= 0 || totalSeconds > 180) return false; // 3分を超えるものは通常動画
+    const totalSeconds = ytDurationToSeconds(iso);
+    const shortsConf = window.ASTRA_CONFIG.SHORTS_FILTER || {};
+    const maxShortSeconds = typeof shortsConf.MAX_DURATION_SECONDS === 'number' ? shortsConf.MAX_DURATION_SECONDS : 180;
+    if (totalSeconds <= 0 || totalSeconds > maxShortSeconds) return false;
 
     const size = ytGetThumbSize(detail);
     if (size) return size.height >= size.width; // 縦長・正方形ならショート
@@ -273,8 +265,8 @@
     return totalSeconds <= 60;
   }
 
-  // 「配信中」かどうかは、検索条件（eventType=live）だけでなく、動画詳細のliveBroadcastContentでも確認する
-  // （プレミア公開など、検索上は"live"扱いでも実際は配信ではない動画を除外するため）
+  // 「配信中」かどうかは、動画詳細のliveBroadcastContentで確認する
+  // （プレミア公開など、紛らわしいものを「配信中」と誤判定しないようにするため）
   function ytIsCurrentlyLive(detail){
     return !!(detail && detail.snippet && detail.snippet.liveBroadcastContent === 'live');
   }
@@ -286,114 +278,136 @@
   }
 
   // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
-  // source: 'youtube-auto' は「自動取得したデータで、取得時に日本語チェック済み」の目印
-  // url: サムネイルクリックで実際の動画へ飛べるようにするためのリンク先
-  function ytBuildLiveItem(gameId, snippetItem, detail){
+  // source: 'youtube-auto' は「自動取得したデータ」の目印
+  // channelId: 管理画面でのブロック設定に使う
+  // url: サムネイルクリックで実際の配信・動画ページへ飛べるようにするためのリンク先
+  function ytBuildLiveItem(chConf, playlistItem, detail){
+    const videoId = playlistItem.snippet.resourceId.videoId;
     return {
-      id: snippetItem.id.videoId,
-      game: gameId,
+      id: videoId,
+      game: chConf.gameId,
       source: 'youtube-auto',
-      url: 'https://www.youtube.com/watch?v=' + snippetItem.id.videoId,
-      title: snippetItem.snippet.title,
-      channel: snippetItem.snippet.channelTitle,
-      thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
-      viewers: (detail && detail.liveStreamingDetails && detail.liveStreamingDetails.concurrentViewers)
+      channelId: chConf.channelId,
+      url: 'https://www.youtube.com/watch?v=' + videoId,
+      title: playlistItem.snippet.title,
+      channel: playlistItem.snippet.channelTitle,
+      thumbnail: (playlistItem.snippet.thumbnails && (playlistItem.snippet.thumbnails.medium || playlistItem.snippet.thumbnails.default) || {}).url || '',
+      viewers: (detail.liveStreamingDetails && detail.liveStreamingDetails.concurrentViewers)
         ? parseInt(detail.liveStreamingDetails.concurrentViewers, 10) : 0,
     };
   }
 
-  function ytBuildVideoItem(gameId, snippetItem, detail){
+  function ytBuildVideoItem(chConf, playlistItem, detail){
+    const videoId = playlistItem.snippet.resourceId.videoId;
     return {
-      id: snippetItem.id.videoId,
-      game: gameId,
+      id: videoId,
+      game: chConf.gameId,
       source: 'youtube-auto',
-      url: 'https://www.youtube.com/watch?v=' + snippetItem.id.videoId,
-      title: snippetItem.snippet.title,
-      channel: snippetItem.snippet.channelTitle,
-      thumbnail: (snippetItem.snippet.thumbnails && (snippetItem.snippet.thumbnails.medium || snippetItem.snippet.thumbnails.default) || {}).url || '',
-      views: (detail && detail.statistics && detail.statistics.viewCount)
-        ? parseInt(detail.statistics.viewCount, 10) : 0,
-      duration: (detail && detail.contentDetails && detail.contentDetails.duration)
-        ? ytFormatDuration(detail.contentDetails.duration) : '',
-      publishedAt: snippetItem.snippet.publishedAt,
+      channelId: chConf.channelId,
+      url: 'https://www.youtube.com/watch?v=' + videoId,
+      title: playlistItem.snippet.title,
+      channel: playlistItem.snippet.channelTitle,
+      thumbnail: (playlistItem.snippet.thumbnails && (playlistItem.snippet.thumbnails.medium || playlistItem.snippet.thumbnails.default) || {}).url || '',
+      views: (detail.statistics && detail.statistics.viewCount) ? parseInt(detail.statistics.viewCount, 10) : 0,
+      duration: (detail.contentDetails && detail.contentDetails.duration) ? ytFormatDuration(detail.contentDetails.duration) : '',
+      publishedAt: playlistItem.snippet.publishedAt,
     };
   }
 
-  // config.js に登録された全キーワード分、YouTubeからデータを検索・取得してlocalStorageに保存する
-  // 「ショート動画」は除外し、「日本語コンテンツらしいもの」だけを残す
+  // config.js の YOUTUBE_CHANNELS に登録された全チャンネル分、YouTubeからデータを取得してlocalStorageに保存する
+  // 「ショート動画」と「配信済みアーカイブ」は動画欄から除外し、配信中のものだけをLIVE欄に載せる
   // index.html / list.html の読み込み時に1回呼び出す想定
   async function refreshYouTubeData(){
     const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
-    const keywordList = window.ASTRA_CONFIG.YOUTUBE_SEARCH_KEYWORDS || [];
-    const cacheMinutes = window.ASTRA_CONFIG.YT_CACHE_MINUTES || YT_CACHE_MINUTES_DEFAULT;
+    const channelList = window.ASTRA_CONFIG.YOUTUBE_CHANNELS || [];
+    const cacheConf = window.ASTRA_CONFIG.CACHE_MINUTES || {};
+    // LIVEのリアルタイム性を優先するため、既定では live のキャッシュ分数（通常0分＝毎回確認）を基準にする
+    const throttleMinutes = typeof cacheConf.live === 'number' ? cacheConf.live : 0;
 
     if (!apiKey || apiKey.indexOf('ここに') === 0) {
       console.warn('[AstralHub] YouTube APIキーが未設定のため、自動取得はスキップされました。');
       return false;
     }
-
-    // 前回の取得から一定時間が経っていなければ何もしない（APIの上限を使い切らないため）
-    const lastFetch = parseInt(localStorage.getItem(YT_LAST_FETCH_KEY) || '0', 10);
-    if (Date.now() - lastFetch < cacheMinutes * 60000) return false;
-
-    const allLive = [];
-    const allVideos = [];
-
-    for (const entry of keywordList) {
-      try {
-        const [liveItems, videoItems] = await Promise.all([
-          ytSearchLiveByKeyword(entry.keyword, apiKey),
-          ytSearchRecentVideosByKeyword(entry.keyword, apiKey),
-        ]);
-
-        const videoIds = [...liveItems, ...videoItems].map(i => i.id.videoId);
-        const details = await ytFetchVideoDetails(videoIds, apiKey);
-        const detailById = new Map(details.map(d => [d.id, d]));
-
-        liveItems.forEach(item => {
-          const detail = detailById.get(item.id.videoId);
-          if (!ytIsCurrentlyLive(detail)) return; // 検索結果の"live"は不正確な場合があるため、詳細情報で再確認する
-          if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
-          allLive.push(ytBuildLiveItem(entry.gameId, item, detail));
-        });
-
-        videoItems.forEach(item => {
-          const detail = detailById.get(item.id.videoId);
-          if (ytIsBroadcastVideo(detail)) return; // 配信中・配信アーカイブは「動画」欄に載せない
-          if (ytIsShort(detail)) return; // ショート動画は除外
-          if (!ytPassesContentFilter(item, detail, entry.keyword)) return;
-          allVideos.push(ytBuildVideoItem(entry.gameId, item, detail));
-        });
-      } catch (e) {
-        console.error('[AstralHub] YouTubeデータの取得に失敗しました（キーワード: ' + entry.keyword + '）', e);
-      }
+    if (channelList.length === 0) {
+      console.warn('[AstralHub] config.js の YOUTUBE_CHANNELS が空のため、自動取得はスキップされました。');
+      return false;
     }
 
+    // 前回の取得から一定時間が経っていなければ何もしない（APIの上限を使い切らないための安全弁）
+    const lastFetch = parseInt(localStorage.getItem(YT_LAST_FETCH_KEY) || '0', 10);
+    if (Date.now() - lastFetch < throttleMinutes * 60000) return false;
+
     try {
+      const channelIds = channelList.map(c => c.channelId).filter(Boolean);
+      const uploadsMap = await ytFetchUploadsPlaylistIds(channelIds, apiKey);
+
+      // 各チャンネルの「アップロード一覧」から、最新の動画を数件ずつ取得する（Playlists API＝消費が少ない）
+      const perChannelResults = await Promise.all(channelList.map(async (chConf) => {
+        const uploadsPlaylistId = uploadsMap.get(chConf.channelId);
+        if (!uploadsPlaylistId) {
+          console.warn('[AstralHub] チャンネルが見つかりませんでした（channelIdをご確認ください）: ' + (chConf.label || chConf.channelId));
+          return [];
+        }
+        try {
+          const items = await ytFetchPlaylistItems(uploadsPlaylistId, apiKey, 5);
+          return items.map(playlistItem => ({ playlistItem, chConf }));
+        } catch (e) {
+          console.error('[AstralHub] プレイリスト取得に失敗しました（チャンネル: ' + (chConf.label || chConf.channelId) + '）', e);
+          return [];
+        }
+      }));
+      const flatItems = perChannelResults.flat();
+
+      // 集めた動画IDをまとめて詳細確認（LIVE状態・再生時間・アーカイブ判定に必要）
+      const videoIds = flatItems.map(x => x.playlistItem.snippet.resourceId.videoId).filter(Boolean);
+      const details = await ytFetchVideoDetails(videoIds, apiKey);
+      const detailById = new Map(details.map(d => [d.id, d]));
+
+      const allLive = [];
+      const allVideos = [];
+
+      flatItems.forEach(({ playlistItem, chConf }) => {
+        const videoId = playlistItem.snippet.resourceId.videoId;
+        const detail = detailById.get(videoId);
+        if (!detail) return;
+
+        if (ytIsCurrentlyLive(detail)) {
+          allLive.push(ytBuildLiveItem(chConf, playlistItem, detail));
+          return; // 配信中のものは「配信」欄だけに載せ、「動画」欄には重複させない
+        }
+        if (ytIsBroadcastVideo(detail)) return; // 配信が終わったアーカイブは「動画」欄に載せない
+        if (ytIsShort(detail)) return; // ショート動画は除外
+
+        allVideos.push(ytBuildVideoItem(chConf, playlistItem, detail));
+      });
+
       localStorage.setItem(STORAGE_KEYS.live, JSON.stringify(allLive));
       localStorage.setItem(STORAGE_KEYS.videos, JSON.stringify(allVideos));
       localStorage.setItem(YT_LAST_FETCH_KEY, String(Date.now()));
       return true;
     } catch (e) {
-      console.error('[AstralHub] 取得したデータの保存に失敗しました', e);
+      console.error('[AstralHub] YouTubeデータの取得に失敗しました', e);
       return false;
     }
   }
 
-  // 「最終更新はいつか」「何分ごとに更新されるか」をHTML側で表示するための情報を返す
+  // 「最終更新はいつか」をHTML側で表示するための情報を返す
   function getYoutubeUpdateInfo(){
-    const cacheMinutes = (window.ASTRA_CONFIG && window.ASTRA_CONFIG.YT_CACHE_MINUTES) || YT_CACHE_MINUTES_DEFAULT;
+    const cacheConf = (window.ASTRA_CONFIG && window.ASTRA_CONFIG.CACHE_MINUTES) || {};
     let lastFetchAt = null;
     try {
       const v = localStorage.getItem(YT_LAST_FETCH_KEY);
       lastFetchAt = v ? parseInt(v, 10) : null;
     } catch (e) { /* 無視 */ }
-    return { lastFetchAt, cacheMinutes };
+    return {
+      lastFetchAt,
+      liveCacheMinutes: typeof cacheConf.live === 'number' ? cacheConf.live : 0,
+      videoCacheMinutes: typeof cacheConf.videos === 'number' ? cacheConf.videos : 0,
+    };
   }
   // ▲ここまで追加 ============================================
 
   window.ASTRA_DATA = {
-    loadJapaneseOnly, saveJapaneseOnly,
     gameById, timeAgoLabel, thumbStyle, emptyHtml,
     liveCardHtml, videoCardHtml, newsItemHtml,
     getFilteredData, findNewsById,
