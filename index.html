@@ -111,6 +111,16 @@
   .game-chip.chip-all.inactive {
     background: var(--bg); border-color: var(--border); color: var(--text-secondary); font-weight: 500;
   }
+  /* アイコン表示用の丸いエリア（PCでは非表示、スマホで表示） */
+  .chip-icon-wrap {
+    display: none;
+    position: relative;
+    align-items: center; justify-content: center;
+    overflow: hidden;
+    color: #fff; font-weight: 900;
+  }
+  .chip-icon-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .chip-icon-fallback { position: relative; z-index: 1; }
 
   /* ---------- Page ---------- */
   .page {
@@ -118,8 +128,53 @@
     display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start;
   }
   @media (max-width: 900px) {
-    .page { grid-template-columns: 1fr; padding: 14px 14px 70px; }
+    .page { grid-template-columns: 1fr; padding: 14px 14px 88px; }
     .sidebar { display: none; }
+  }
+
+  /* ---------- スマホ版：ゲーム選択メニューをアイコン化 ---------- */
+  @media (max-width: 900px) {
+    .filter-bar-wrap { padding: 12px 14px 12px; }
+    .filter-bar {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    .filter-bar::-webkit-scrollbar { display: none; }
+
+    .game-chip.chip-all {
+      flex-shrink: 0;
+      padding: 0 16px;
+      height: 48px;
+      border-radius: 24px;
+      font-size: 12.5px;
+    }
+    .game-chip[data-game] {
+      flex-shrink: 0;
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border-radius: 50%;
+      border: 2.5px solid transparent;
+      justify-content: center;
+      background: none;
+    }
+    .game-chip[data-game] .swatch,
+    .game-chip[data-game] .chip-label {
+      display: none;
+    }
+    .game-chip[data-game] .chip-icon-wrap {
+      display: flex;
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      font-size: 16px;
+    }
+    .game-chip[data-game].active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
   }
 
   .panel {
@@ -233,11 +288,18 @@
   .mobile-tabbar { display: none; }
   @media (max-width: 900px) {
     .mobile-tabbar {
-      display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+      display: flex; gap: 8px;
+      position: fixed; bottom: 0; left: 0; right: 0;
+      padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
       border-top: 1px solid var(--border); background: var(--bg); z-index: 20;
     }
-    .mobile-tabbar button { flex: 1; border: none; background: none; padding: 10px 0 8px; font-size: 11px; color: var(--text-faint); font-weight: 500; }
-    .mobile-tabbar button.active { color: var(--accent); font-weight: 700; }
+    .mobile-tabbar button {
+      flex: 1; border: none; border-radius: 10px;
+      background: var(--surface-strong); color: var(--text-secondary);
+      padding: 13px 0; font-size: 13.5px; font-weight: 700;
+      transition: background .15s ease, color .15s ease;
+    }
+    .mobile-tabbar button.active { background: var(--text); color: #fff; }
   }
 
   /* ---------- Side panel (settings) ---------- */
@@ -379,8 +441,16 @@ function renderFilterBar(){
   let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
   html += GAMES.map(g => {
     const active = activeGames.has(g.id);
-    return `<button class="game-chip ${active?'active':''}" data-game="${g.id}">
-      <span class="swatch" style="background:${g.color}"></span>${g.name}
+    const initial = (g.name || '?').charAt(0);
+    const iconInner = g.icon
+      ? `<img class="chip-icon-img" src="${g.icon}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.removeProperty('display');"><span class="chip-icon-fallback" style="display:none;">${initial}</span>`
+      : `<span class="chip-icon-fallback">${initial}</span>`;
+    return `<button class="game-chip ${active?'active':''}" data-game="${g.id}" title="${g.name}">
+      <span class="swatch" style="background:${g.color}"></span>
+      <span class="chip-icon-wrap" style="background:${g.color}">
+        ${iconInner}
+      </span>
+      <span class="chip-label">${g.name}</span>
     </button>`;
   }).join('');
   document.getElementById('filterBar').innerHTML = html;
