@@ -291,6 +291,36 @@
     return !!(detail && detail.liveStreamingDetails);
   }
 
+  // ▼ここから追加：タイトルキーワードによる自動仕分け・絞り込み ============================================
+  // 役割：1つのチャンネルが複数のゲームを配信することがあるため、動画のタイトル・概要欄を見て
+  //       「本当はどのゲームの動画か」を判定し、次の2つを行う。
+  //         ①手動登録されたgameIdと違うゲームのキーワードが見つかった場合 → gameIdを自動的に書き換える（仕分け）
+  //         ②どのゲームのキーワードにも一致しなかった場合 → nullを返す（呼び出し側で保存をスキップし、除外する）
+  //       ただし、config.js の KEYWORD_FILTER_EXEMPT_CHANNEL_IDS に登録されているチャンネル
+  //       （動作確認用のウェザーニュースなど）は、この判定をまるごと免除し、常に手動登録した
+  //       gameIdのまま通過させる。
+  //
+  // 戻り値：保存すべきgameId（文字列） / 除外すべき場合は null
+  function classifyGameIdForItem(detail, chConf){
+    const exemptIds = window.ASTRA_CONFIG.KEYWORD_FILTER_EXEMPT_CHANNEL_IDS || [];
+    if (chConf.channelId && exemptIds.includes(chConf.channelId)) {
+      return chConf.gameId; // 免除チャンネル：キーワード判定をせず、そのまま通す
+    }
+
+    const snippet = (detail && detail.snippet) || {};
+    const text = ((snippet.title || '') + ' ' + (snippet.description || '')).toLowerCase();
+
+    const gameKeywords = window.ASTRA_CONFIG.GAME_KEYWORDS || {};
+    const matchedGameIds = Object.keys(gameKeywords).filter(gameId =>
+      (gameKeywords[gameId] || []).some(kw => text.includes(String(kw).toLowerCase()))
+    );
+
+    if (matchedGameIds.length === 0) return null; // どのゲームのキーワードにも一致しない → 除外
+    if (matchedGameIds.includes(chConf.gameId)) return chConf.gameId; // 手動登録どおりのゲームで一致 → そのまま
+    return matchedGameIds[0]; // 別ゲームのキーワードを検知 → そのゲームのIDに書き換え
+  }
+  // ▲ここまで追加 ============================================
+
   // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
   // source: 'youtube-auto' は「自動取得したデータ」の目印
   // channelId: 管理画面でのブロック設定に使う
@@ -331,6 +361,7 @@
 
   // config.js の YOUTUBE_CHANNELS に登録された全チャンネル分、YouTubeからデータを取得してlocalStorageに保存する
   // 「ショート動画」と「配信済みアーカイブ」は動画欄から除外し、配信中のものだけをLIVE欄に載せる
+  // さらに、タイトルキーワードによる仕分け・絞り込み（classifyGameIdForItem）もここで適用する
   // index.html / list.html の読み込み時に1回呼び出す想定
   async function refreshYouTubeData(){
     const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
@@ -410,7 +441,14 @@
           detail ? { liveBroadcastContent: detail.snippet && detail.snippet.liveBroadcastContent } : '詳細が取得できませんでした（detailがありません）');
         if (!detail) return;
         if (!ytIsCurrentlyLive(detail)) { console.log('[AstralHub][調査] → 二重チェックでliveと判定されず除外されました'); return; } // 念のため二重チェック（確認直後に配信が終わった場合など）
-        allLive.push(ytBuildLiveItem(chConf, videoId, detail));
+
+        // ▼タイトルキーワードによる仕分け・絞り込みを適用する
+        const classifiedGameId = classifyGameIdForItem(detail, chConf);
+        if (classifiedGameId === null) {
+          console.log('[AstralHub][調査] → タイトルがどのゲームのキーワードにも一致しないため除外されました:', detail.snippet && detail.snippet.title);
+          return;
+        }
+        allLive.push(ytBuildLiveItem({ ...chConf, gameId: classifiedGameId }, videoId, detail));
         usedLiveVideoIds.add(videoId);
       });
 
@@ -423,7 +461,13 @@
         if (ytIsBroadcastVideo(detail)) return; // 配信が終わったアーカイブは「動画」欄に載せない
         if (ytIsShort(detail)) return; // ショート動画は除外
 
-        allVideos.push(ytBuildVideoItem(chConf, playlistItem, detail));
+        // ▼タイトルキーワードによる仕分け・絞り込みを適用する
+        const classifiedGameId = classifyGameIdForItem(detail, chConf);
+        if (classifiedGameId === null) {
+          console.log('[AstralHub][調査] → タイトルがどのゲームのキーワードにも一致しないため除外されました:', playlistItem.snippet.title);
+          return;
+        }
+        allVideos.push(ytBuildVideoItem({ ...chConf, gameId: classifiedGameId }, playlistItem, detail));
       });
 
       // ▼調査用ログ（最終結果）
