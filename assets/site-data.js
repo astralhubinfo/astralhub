@@ -57,6 +57,20 @@
     } catch (e) { return []; }
   }
 
+  // 管理画面の「チャンネル登録（手動）」タブで登録されたチャンネルを読み込む。
+  // 保存されている形は { game, channelId, label, ... } なので、config.js の YOUTUBE_CHANNELS と
+  // 同じ形（channelId, gameId, label）に変換して返す。
+  function loadManualChannels(){
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.manualChannels);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter(c => c && c.channelId)
+        .map(c => ({ channelId: c.channelId, gameId: c.game, label: c.label || c.channelId }));
+    } catch (e) { return []; }
+  }
+
   function gameById(id){ return window.ASTRA_CONFIG.GAMES.find(g => g.id === id); }
 
   function timeAgoLabel(publishedAt){
@@ -365,7 +379,15 @@
   // index.html / list.html の読み込み時に1回呼び出す想定
   async function refreshYouTubeData(){
     const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
-    const channelList = window.ASTRA_CONFIG.YOUTUBE_CHANNELS || [];
+
+    // 自動取得の対象チャンネルは「config.js に直接書かれたチャンネル」と
+    // 「管理画面の『チャンネル登録（手動）』タブで登録されたチャンネル」を合わせたものにする。
+    // 同じchannelIdが両方にある場合は、config.js側の設定を優先する（手動登録側は無視する）。
+    const configChannels = window.ASTRA_CONFIG.YOUTUBE_CHANNELS || [];
+    const manualChannels = loadManualChannels();
+    const configChannelIds = new Set(configChannels.map(c => c.channelId));
+    const channelList = [...configChannels, ...manualChannels.filter(c => !configChannelIds.has(c.channelId))];
+
     const cacheConf = window.ASTRA_CONFIG.CACHE_MINUTES || {};
     // LIVEのリアルタイム性を優先するため、既定では live のキャッシュ分数（通常0分＝毎回確認）を基準にする
     const throttleMinutes = typeof cacheConf.live === 'number' ? cacheConf.live : 0;
@@ -375,7 +397,7 @@
       return false;
     }
     if (channelList.length === 0) {
-      console.warn('[AstralHub] config.js の YOUTUBE_CHANNELS が空のため、自動取得はスキップされました。');
+      console.warn('[AstralHub] 登録されているチャンネルが1件もないため、自動取得はスキップされました（config.js の YOUTUBE_CHANNELS、または管理画面の「チャンネル登録（手動）」タブでチャンネルを登録してください）。');
       return false;
     }
 

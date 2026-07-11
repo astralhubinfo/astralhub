@@ -109,6 +109,9 @@ window.ASTRA_CONFIG = {
     live: 'astra_data_live',
     videos: 'astra_data_videos',
     channels: 'astra_data_channels',
+    // 管理画面の「チャンネル登録（手動）」タブで登録したチャンネル（channelId, gameId, label）の保存先。
+    // config.js の YOUTUBE_CHANNELS と合わせて、自動取得の対象チャンネルとして扱われます。
+    manualChannels: 'astra_data_manual_channels',
     sectionOrder: 'astra_section_order_list',
   }
 };

@@ -117,28 +117,16 @@ const TYPES = {
     ],
     columns: ['game','cat','title','summary','url','time'],
   },
-  live: {
-    label: '配信中(LIVE)',
+  manualChannels: {
+    label: 'チャンネル登録（手動）',
+    hint: 'チャンネルIDだけを登録しておくと、次回の自動更新から他のチャンネルと同じようにLIVE・動画が自動で取得されるようになります。テスト用チャンネルや、まだconfig.jsに書き込むか迷っているチャンネルの仮登録に便利です。',
     fields: [
       { key:'game', label:'ゲーム', type:'game-select' },
-      { key:'channel', label:'チャンネル名', type:'text', placeholder:'例：原神公式' },
-      { key:'viewers', label:'視聴者数', type:'number', placeholder:'例：12345' },
-      { key:'title', label:'配信タイトル', type:'text', full:true },
-      { key:'url', label:'配信URL（YouTube/Twitch）', type:'text', full:true, placeholder:'https://...' },
+      { key:'channelId', label:'チャンネルID', type:'text', full:true, placeholder:'UCから始まる24文字（チャンネルページの「チャンネルIDをコピー」から取得）' },
+      { key:'label', label:'メモ・ラベル（任意・一覧の見分け用、表示には使いません）', type:'text', full:true, placeholder:'例：原神公式（テスト登録）' },
     ],
-    columns: ['game','channel','title','viewers','url'],
-  },
-  videos: {
-    label: '動画',
-    fields: [
-      { key:'game', label:'ゲーム', type:'game-select' },
-      { key:'channel', label:'チャンネル名', type:'text' },
-      { key:'duration', label:'動画の長さ（例: 4:57）', type:'text', placeholder:'4:57' },
-      { key:'views', label:'再生数', type:'number', placeholder:'例：120000' },
-      { key:'title', label:'動画タイトル', type:'text', full:true },
-      { key:'url', label:'動画URL', type:'text', full:true, placeholder:'https://...' },
-    ],
-    columns: ['game','channel','title','views','duration','url','time'],
+    columns: ['game','channelId','label'],
+    requiredKey: 'channelId',
   },
   channels: {
     label: 'チャンネル管理',
@@ -166,8 +154,7 @@ let editingIndex = null; // nullなら新規登録モード、数値なら編集
 
 function storageKeyFor(type){
   if (type === 'news') return STORAGE_KEYS.news;
-  if (type === 'live') return STORAGE_KEYS.live;
-  if (type === 'videos') return STORAGE_KEYS.videos;
+  if (type === 'manualChannels') return STORAGE_KEYS.manualChannels;
   return STORAGE_KEYS.channels;
 }
 function makeId(){
@@ -243,7 +230,7 @@ function renderTabContent(){
   const formHtml = `
     <div class="panel">
       <h2>${isEditing ? `編集：${type.label}` : `新規登録：${type.label}`}</h2>
-      <p class="hint">${isEditing ? '内容を修正して「保存する」を押してください。' : 'Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。'}</p>
+      <p class="hint">${isEditing ? '内容を修正して「保存する」を押してください。' : (type.hint || 'Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。')}</p>
       <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}</div>
       <div style="display:flex; gap:8px;">
         <button class="submit-btn" id="submitBtn">${isEditing ? '保存する' : '登録する'}</button>
@@ -281,7 +268,7 @@ function renderTabContent(){
       <div class="table-wrap">
         <table>
           <thead><tr>
-            ${type.columns.map(c => `<th>${({game:'ゲーム',cat:'カテゴリ',title:'タイトル',summary:'本文',url:'URL',time:'登録日時',channel:'チャンネル',viewers:'視聴者数',views:'再生数',duration:'長さ',platform:'プラットフォーム',language:'言語',blocked:'掲載可否',blockReason:'非掲載理由'})[c]}</th>`).join('')}
+            ${type.columns.map(c => `<th>${({game:'ゲーム',cat:'カテゴリ',title:'タイトル',summary:'本文',url:'URL',time:'登録日時',channel:'チャンネル',viewers:'視聴者数',views:'再生数',duration:'長さ',platform:'プラットフォーム',language:'言語',blocked:'掲載可否',blockReason:'非掲載理由',channelId:'チャンネルID',label:'メモ・ラベル'})[c]}</th>`).join('')}
             <th></th>
           </tr></thead>
           <tbody>${rows || `<tr class="empty-row"><td colspan="${type.columns.length+1}">まだ登録がありません</td></tr>`}</tbody>
