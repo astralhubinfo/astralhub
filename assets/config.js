@@ -24,7 +24,9 @@ window.ASTRA_CONFIG = {
   YOUTUBE_CHANNELS: [
     // ★動作確認用：24時間LIVE配信しているウェザーニュース公式チャンネル
     // 　（LIVE表示が正しく動くかのテスト用です。本番に不要になったらこの1行を削除するだけでOK）
-    { channelId: 'UCNsidkYpIAQ4QaufptQBPHQ', gameId: 'test', label: 'ウェザーニュース（LIVEテスト用）' },
+    // 　gameIdは「GAMESに実在するID」でないと、ゲーム絞り込みフィルターに引っかかって
+    // 　一覧から消えてしまうため、動作確認用に一旦 'genshin' を指定しています。
+    { channelId: 'UCNsidkYpIAQ4QaufptQBPHQ', gameId: 'genshin', label: 'ウェザーニュース（LIVEテスト用）' },
 
     // ↓ここから下に、実際に登録したい配信者・公式チャンネルを追加していってください
     // 例）{ channelId: 'UCxxxxxxxxxxxxxxxxxxxxxx', gameId: 'genshin', label: '原神公式' },
@@ -33,7 +35,10 @@ window.ASTRA_CONFIG = {
   // 動画の種類ごとの更新頻度（分単位）
   // LIVEは0（=毎回リアルタイムで確認）、動画はAPI節約のため少し間隔をあけます
   CACHE_MINUTES: {
-    live: 0,     // LIVEは常に最新を確認（リアルタイム性を優先）
+    // LIVE確認には消費の大きい「search API」を使うようになったため、
+    // 0分（毎回チェック）のままだと将来チャンネル数が増えたときにAPIの上限に早く達してしまいます。
+    // 3分に1回のチェックでも十分リアルタイムなLIVE表示ができるため、3分に設定しています。
+    live: 3,
     videos: 5,   // 通常動画・新着は5分キャッシュ
   },
 

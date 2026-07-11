@@ -168,10 +168,15 @@
 
   // ▼ここから追加：YouTube自動取得機能（チャンネル指定方式） ============================================
   // 役割：config.js の YOUTUBE_CHANNELS に登録されたチャンネルひとつひとつについて、
-  //       「アップロード一覧（Playlists API）」→「動画の詳細（Videos API）」の順で確認し、
-  //       LIVE配信中のものと、通常の動画（ショート・アーカイブを除く）を仕分けて
-  //       STORAGE_KEYS.live / STORAGE_KEYS.videos に保存する。
-  //       ※ Search API（消費が激しい「検索」）は一切使わないため、API消費を大幅に抑えられる。
+  //       ①「今まさにLIVE配信中か」を search API でピンポイントに確認する
+  //       ②「アップロード一覧（Playlists API）」から通常動画（ショート・アーカイブを除く）を取得する
+  //       という2つの処理を行い、STORAGE_KEYS.live / STORAGE_KEYS.videos に保存する。
+  //
+  //       【重要・修正メモ】YouTubeの仕様上、配信中のLIVE動画は「配信が終わってアーカイブになるまで」
+  //       アップロード一覧（Playlists API）には出てきません。そのため、LIVE検知だけは
+  //       search API（type=video&eventType=live）で別途確認する必要があります。
+  //       search APIは他のAPIより消費（クォータ）が大きいため、通常動画の取得には使わず
+  //       「LIVE検知」の用途だけに限定して使っています。
 
   const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
 
@@ -230,6 +235,15 @@
     return data.items || [];
   }
 
+  // ★新規追加：指定したチャンネルが「今まさにLIVE配信中」かどうかをピンポイントで確認する
+  // アップロード一覧には出てこない「配信中」の動画を見つけるための唯一の確実な方法（search API）
+  // 通常は0件（配信していない）か1件（配信中）が返る
+  async function ytFetchLiveVideoIds(channelId, apiKey){
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`;
+    const data = await ytFetchJson(url);
+    return (data.items || []).map(item => item.id && item.id.videoId).filter(Boolean);
+  }
+
   // 動画IDの一覧から、再生回数・動画の長さ・同時視聴者数・LIVE状態などの詳細情報をまとめて取得する（最大50件ずつ）
   async function ytFetchVideoDetails(videoIds, apiKey){
     if (videoIds.length === 0) return [];
@@ -281,17 +295,18 @@
   // source: 'youtube-auto' は「自動取得したデータ」の目印
   // channelId: 管理画面でのブロック設定に使う
   // url: サムネイルクリックで実際の配信・動画ページへ飛べるようにするためのリンク先
-  function ytBuildLiveItem(chConf, playlistItem, detail){
-    const videoId = playlistItem.snippet.resourceId.videoId;
+  // LIVEカード用のデータを組み立てる（search APIで見つけた videoId と、videos APIで取得した詳細情報から作る）
+  function ytBuildLiveItem(chConf, videoId, detail){
+    const snippet = detail.snippet || {};
     return {
       id: videoId,
       game: chConf.gameId,
       source: 'youtube-auto',
       channelId: chConf.channelId,
       url: 'https://www.youtube.com/watch?v=' + videoId,
-      title: playlistItem.snippet.title,
-      channel: playlistItem.snippet.channelTitle,
-      thumbnail: (playlistItem.snippet.thumbnails && (playlistItem.snippet.thumbnails.medium || playlistItem.snippet.thumbnails.default) || {}).url || '',
+      title: snippet.title || '',
+      channel: snippet.channelTitle || chConf.label || '',
+      thumbnail: (snippet.thumbnails && (snippet.thumbnails.medium || snippet.thumbnails.default) || {}).url || '',
       viewers: (detail.liveStreamingDetails && detail.liveStreamingDetails.concurrentViewers)
         ? parseInt(detail.liveStreamingDetails.concurrentViewers, 10) : 0,
     };
@@ -335,14 +350,32 @@
 
     // 前回の取得から一定時間が経っていなければ何もしない（APIの上限を使い切らないための安全弁）
     const lastFetch = parseInt(localStorage.getItem(YT_LAST_FETCH_KEY) || '0', 10);
-    if (Date.now() - lastFetch < throttleMinutes * 60000) return false;
+    if (Date.now() - lastFetch < throttleMinutes * 60000) {
+      console.log('[AstralHub][調査] 前回の取得から時間が経っていないため、今回はスキップされました（' + throttleMinutes + '分待つと再取得します）');
+      return false;
+    }
 
     try {
       const channelIds = channelList.map(c => c.channelId).filter(Boolean);
       const uploadsMap = await ytFetchUploadsPlaylistIds(channelIds, apiKey);
 
-      // 各チャンネルの「アップロード一覧」から、最新の動画を数件ずつ取得する（Playlists API＝消費が少ない）
-      const perChannelResults = await Promise.all(channelList.map(async (chConf) => {
+      // ① 各チャンネルについて「今まさにLIVE配信中か」を確認する（search API・LIVE検知専用）
+      const liveCheckResults = await Promise.all(channelList.map(async (chConf) => {
+        if (!chConf.channelId) return [];
+        try {
+          const videoIds = await ytFetchLiveVideoIds(chConf.channelId, apiKey);
+          // ▼調査用ログ（原因特定のための一時的なものです。解決したら削除してOKです）
+          console.log('[AstralHub][調査] チャンネル「' + (chConf.label || chConf.channelId) + '」のLIVE検索結果:', videoIds.length + '件', videoIds);
+          return videoIds.map(videoId => ({ videoId, chConf }));
+        } catch (e) {
+          console.error('[AstralHub] LIVE確認に失敗しました（チャンネル: ' + (chConf.label || chConf.channelId) + '）', e);
+          return [];
+        }
+      }));
+      const flatLiveCandidates = liveCheckResults.flat();
+
+      // ② 各チャンネルの「アップロード一覧」から、通常動画の候補を取得する（Playlists API＝消費が少ない）
+      const perChannelVideoResults = await Promise.all(channelList.map(async (chConf) => {
         const uploadsPlaylistId = uploadsMap.get(chConf.channelId);
         if (!uploadsPlaylistId) {
           console.warn('[AstralHub] チャンネルが見つかりませんでした（channelIdをご確認ください）: ' + (chConf.label || chConf.channelId));
@@ -356,30 +389,45 @@
           return [];
         }
       }));
-      const flatItems = perChannelResults.flat();
+      const flatVideoItems = perChannelVideoResults.flat();
 
-      // 集めた動画IDをまとめて詳細確認（LIVE状態・再生時間・アーカイブ判定に必要）
-      const videoIds = flatItems.map(x => x.playlistItem.snippet.resourceId.videoId).filter(Boolean);
-      const details = await ytFetchVideoDetails(videoIds, apiKey);
+      // ③ LIVE候補・通常動画候補、両方の動画IDをまとめて詳細確認する（videos APIはまとめて呼べるので節約できる）
+      const liveVideoIds = flatLiveCandidates.map(x => x.videoId);
+      const normalVideoIds = flatVideoItems.map(x => x.playlistItem.snippet.resourceId.videoId).filter(Boolean);
+      const allVideoIds = Array.from(new Set([...liveVideoIds, ...normalVideoIds]));
+      const details = await ytFetchVideoDetails(allVideoIds, apiKey);
       const detailById = new Map(details.map(d => [d.id, d]));
 
       const allLive = [];
       const allVideos = [];
+      const usedLiveVideoIds = new Set();
 
-      flatItems.forEach(({ playlistItem, chConf }) => {
+      // LIVE欄を組み立てる（search APIで「配信中」と確認できたものだけを対象にする）
+      flatLiveCandidates.forEach(({ videoId, chConf }) => {
+        const detail = detailById.get(videoId);
+        // ▼調査用ログ
+        console.log('[AstralHub][調査] videoId=' + videoId + ' の詳細:',
+          detail ? { liveBroadcastContent: detail.snippet && detail.snippet.liveBroadcastContent } : '詳細が取得できませんでした（detailがありません）');
+        if (!detail) return;
+        if (!ytIsCurrentlyLive(detail)) { console.log('[AstralHub][調査] → 二重チェックでliveと判定されず除外されました'); return; } // 念のため二重チェック（確認直後に配信が終わった場合など）
+        allLive.push(ytBuildLiveItem(chConf, videoId, detail));
+        usedLiveVideoIds.add(videoId);
+      });
+
+      // 通常動画欄を組み立てる（LIVE欄に入ったもの・アーカイブ・ショートは除外する）
+      flatVideoItems.forEach(({ playlistItem, chConf }) => {
         const videoId = playlistItem.snippet.resourceId.videoId;
+        if (usedLiveVideoIds.has(videoId)) return; // LIVE欄に入っているものは動画欄に重複させない
         const detail = detailById.get(videoId);
         if (!detail) return;
-
-        if (ytIsCurrentlyLive(detail)) {
-          allLive.push(ytBuildLiveItem(chConf, playlistItem, detail));
-          return; // 配信中のものは「配信」欄だけに載せ、「動画」欄には重複させない
-        }
         if (ytIsBroadcastVideo(detail)) return; // 配信が終わったアーカイブは「動画」欄に載せない
         if (ytIsShort(detail)) return; // ショート動画は除外
 
         allVideos.push(ytBuildVideoItem(chConf, playlistItem, detail));
       });
+
+      // ▼調査用ログ（最終結果）
+      console.log('[AstralHub][調査] 最終的にLIVE欄に入った件数:', allLive.length, allLive);
 
       localStorage.setItem(STORAGE_KEYS.live, JSON.stringify(allLive));
       localStorage.setItem(STORAGE_KEYS.videos, JSON.stringify(allVideos));
