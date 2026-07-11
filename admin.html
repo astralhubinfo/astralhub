@@ -66,6 +66,22 @@
     font-size: 13px; opacity:0; pointer-events:none; transition: opacity 0.25s;
   }
   .toast.show { opacity: 1; }
+
+  /* ▼チャンネル発掘機能 */
+  .submit-btn:disabled { background: var(--text-faint); cursor: default; }
+  .discover-list { display:flex; flex-direction:column; gap:8px; max-height: 480px; overflow-y:auto; }
+  .discover-item {
+    display:flex; align-items:center; gap:12px; padding:10px; border:1px solid var(--border);
+    border-radius: var(--radius-md); cursor:pointer;
+  }
+  .discover-item:hover { background: var(--surface-strong); }
+  .discover-item input[type="checkbox"] { width:16px; height:16px; flex-shrink:0; }
+  .discover-thumb { width:48px; height:48px; border-radius:50%; object-fit:cover; background:var(--surface-strong); flex-shrink:0; }
+  .discover-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .discover-name { font-weight:700; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .discover-meta { font-size:11.5px; color: var(--text-secondary); }
+  .discover-id { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); }
+  #discoverOutput { font-family: var(--font-mono); font-size:12px; min-height:140px; resize:vertical; }
 </style>
 </head>
 <body>
@@ -184,8 +200,12 @@ function showToast(msg){
 }
 
 function renderTabBar(){
-  document.getElementById('tabBar').innerHTML = Object.keys(TYPES).map(key =>
-    `<button class="tab-btn ${activeType===key?'active':''}" data-type="${key}">${TYPES[key].label}</button>`
+  const tabs = [
+    ...Object.keys(TYPES).map(key => ({ key, label: TYPES[key].label })),
+    { key: 'discover', label: 'チャンネル発掘' },
+  ];
+  document.getElementById('tabBar').innerHTML = tabs.map(t =>
+    `<button class="tab-btn ${activeType===t.key?'active':''}" data-type="${t.key}">${t.label}</button>`
   ).join('');
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => { activeType = btn.dataset.type; editingIndex = null; renderTabBar(); renderTabContent(); });
@@ -214,6 +234,7 @@ function fieldHtml(f){
 }
 
 function renderTabContent(){
+  if (activeType === 'discover') { renderDiscoverTab(); return; }
   const type = TYPES[activeType];
   const items = loadItems(activeType);
   const isEditing = editingIndex !== null && items[editingIndex];
@@ -338,6 +359,188 @@ function renderTabContent(){
 
 renderTabBar();
 renderTabContent();
+
+// ▼ここから追加：チャンネル発掘機能（半自動化） ============================================
+// 役割：管理者がキーワードを入力すると、YouTubeのsearch API（type=channel）で候補チャンネルを探し、
+//       チェックした分だけ config.js の YOUTUBE_CHANNELS 形式のコードに変換して出力する。
+// 注意：search APIは他のAPIより消費（クォータ）が大きいため、むやみに何度も検索しないよう
+//       hintでも案内している。
+
+let discoverResults = []; // 検索結果（{channelId, title, thumbnail, subscriberCount, checked}の配列）
+
+async function ytFetchJson(url){
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error('YouTube APIエラー: ' + res.status + ' ' + body);
+  }
+  return res.json();
+}
+
+function chunkArray(arr, size){
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// キーワードでチャンネルを検索し、登録者数もあわせて取得する
+async function searchYouTubeChannels(keyword, apiKey){
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=25&q=${encodeURIComponent(keyword)}&key=${apiKey}`;
+  const data = await ytFetchJson(url);
+  const items = data.items || [];
+  const channelIds = items.map(it => it.snippet && it.snippet.channelId).filter(Boolean);
+  const statsMap = await fetchChannelStats(channelIds, apiKey);
+
+  return items.map(it => {
+    const channelId = it.snippet.channelId;
+    const stats = statsMap.get(channelId) || {};
+    return {
+      channelId,
+      title: it.snippet.title,
+      thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default) || {}).url || '',
+      subscriberCount: (!stats.hiddenSubscriberCount && stats.subscriberCount) ? parseInt(stats.subscriberCount, 10) : null,
+    };
+  });
+}
+
+// チャンネルIDの一覧から、登録者数などの統計情報をまとめて取得する（最大50件ずつ）
+async function fetchChannelStats(channelIds, apiKey){
+  const map = new Map();
+  for (const chunk of chunkArray(channelIds, 50)) {
+    if (chunk.length === 0) continue;
+    const url = `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${chunk.join(',')}&key=${apiKey}`;
+    const data = await ytFetchJson(url);
+    (data.items || []).forEach(ch => map.set(ch.id, ch.statistics || {}));
+  }
+  return map;
+}
+
+function renderDiscoverTab(){
+  const html = `
+    <div class="panel">
+      <h2>新しいチャンネルを探す</h2>
+      <p class="hint">
+        キーワードでYouTubeのチャンネルを検索できます。見つかった候補の中から登録したいものにチェックを入れ、
+        「コードに変換する」を押すと、config.js にそのまま貼り付けられる形式で出力されます。<br>
+        ※検索1回ごとにAPIの利用量を多めに消費します。むやみに何度も検索しないようご注意ください。
+      </p>
+      <div class="form-grid">
+        <div class="field">
+          <label>対応ゲーム（チェックした全チャンネルに適用されます）</label>
+          <select id="discoverGameSelect">${GAMES.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}</select>
+        </div>
+        <div class="field full">
+          <label>検索キーワード</label>
+          <input type="text" id="discoverKeyword" placeholder="例：原神 公式 切り抜き">
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="submit-btn" id="discoverSearchBtn">新しいチャンネルを探す</button>
+      </div>
+    </div>
+
+    <div class="panel" id="discoverResultsPanel" style="${discoverResults.length ? '' : 'display:none;'}">
+      <h2>検索結果（登録したいものにチェック）</h2>
+      <div id="discoverResultsList" class="discover-list"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="submit-btn" id="discoverGenerateBtn">選んだチャンネルをコードに変換する</button>
+      </div>
+    </div>
+
+    <div class="panel" id="discoverOutputPanel" style="display:none;">
+      <h2>config.js に貼り付けるコード</h2>
+      <p class="hint">下のコードをコピーして、config.js の YOUTUBE_CHANNELS の配列の中に貼り付けてください。</p>
+      <div class="field full"><textarea id="discoverOutput" rows="6" readonly></textarea></div>
+      <div style="display:flex; gap:8px;">
+        <button class="submit-btn" id="discoverCopyBtn">コピーする</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('tabContent').innerHTML = html;
+  renderDiscoverResultsList();
+
+  document.getElementById('discoverSearchBtn').addEventListener('click', handleDiscoverSearch);
+  document.getElementById('discoverGenerateBtn')?.addEventListener('click', handleDiscoverGenerate);
+  document.getElementById('discoverCopyBtn')?.addEventListener('click', handleDiscoverCopy);
+}
+
+function renderDiscoverResultsList(){
+  const wrap = document.getElementById('discoverResultsList');
+  if (!wrap) return;
+  wrap.innerHTML = discoverResults.map((c, idx) => `
+    <label class="discover-item">
+      <input type="checkbox" data-discover-idx="${idx}" ${c.checked ? 'checked' : ''}>
+      <img class="discover-thumb" src="${c.thumbnail}" alt="" onerror="this.style.visibility='hidden'">
+      <span class="discover-info">
+        <span class="discover-name">${c.title}</span>
+        <span class="discover-meta">登録者 ${c.subscriberCount != null ? c.subscriberCount.toLocaleString() + '人' : '非公開'}</span>
+        <span class="discover-id">${c.channelId}</span>
+      </span>
+    </label>
+  `).join('');
+  wrap.querySelectorAll('[data-discover-idx]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      discoverResults[Number(cb.dataset.discoverIdx)].checked = cb.checked;
+    });
+  });
+}
+
+async function handleDiscoverSearch(){
+  const keyword = document.getElementById('discoverKeyword').value.trim();
+  if (!keyword) { showToast('検索キーワードを入力してください'); return; }
+
+  const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
+  if (!apiKey || apiKey.indexOf('ここに') === 0) {
+    showToast('YouTube APIキーが設定されていません（config.jsをご確認ください）');
+    return;
+  }
+
+  const btn = document.getElementById('discoverSearchBtn');
+  btn.disabled = true;
+  btn.textContent = '検索中…';
+
+  try {
+    const channels = await searchYouTubeChannels(keyword, apiKey);
+    discoverResults = channels.map(c => ({ ...c, checked: false }));
+    document.getElementById('discoverOutputPanel').style.display = 'none';
+    document.getElementById('discoverResultsPanel').style.display = discoverResults.length ? '' : 'none';
+    renderDiscoverResultsList();
+    if (discoverResults.length === 0) showToast('見つかりませんでした。キーワードを変えてお試しください');
+  } catch (e) {
+    console.error('[AstralHub] チャンネル検索に失敗しました', e);
+    showToast('検索に失敗しました。APIキーや利用上限をご確認ください');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '新しいチャンネルを探す';
+  }
+}
+
+function handleDiscoverGenerate(){
+  const gameId = document.getElementById('discoverGameSelect').value;
+  const selected = discoverResults.filter(c => c.checked);
+  if (selected.length === 0) { showToast('チャンネルを1つ以上選んでください'); return; }
+
+  const lines = selected.map(c => {
+    const safeLabel = String(c.title).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `    { channelId: '${c.channelId}', gameId: '${gameId}', label: '${safeLabel}' },`;
+  });
+  const outputPanel = document.getElementById('discoverOutputPanel');
+  document.getElementById('discoverOutput').value = lines.join('\n');
+  outputPanel.style.display = '';
+  outputPanel.scrollIntoView({ behavior: 'smooth' });
+}
+
+function handleDiscoverCopy(){
+  const ta = document.getElementById('discoverOutput');
+  ta.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(() => showToast('コピーしました')).catch(() => showToast('コピーに失敗しました'));
+  } else {
+    document.execCommand('copy');
+    showToast('コピーしました');
+  }
+}
+// ▲ここまで追加 ============================================
 </script>
 </body>
 </html>
