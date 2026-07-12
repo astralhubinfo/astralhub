@@ -122,9 +122,6 @@
   .chip-icon-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .chip-icon-fallback { position: relative; z-index: 1; }
 
-  .filter-bar-row { display: flex; align-items: flex-start; gap: 8px; }
-  .filter-toggle-btn { display: none; }
-
   /* ---------- Page ---------- */
   .page {
     max-width: 1240px; margin: 0 auto; padding: 20px;
@@ -139,34 +136,17 @@
   @media (max-width: 900px) {
     .filter-bar-wrap { padding: 12px 14px 12px; }
     .filter-bar {
-      flex: 1;
-      min-width: 0;
       flex-wrap: nowrap;
       gap: 7px;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
       padding-bottom: 2px;
+      /* スクロールできることが分かるよう、右端をふわっとフェードさせる */
+      mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+      -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
     }
     .filter-bar::-webkit-scrollbar { display: none; }
-
-    /* 「もっと見る」で展開すると、横スクロール一覧 → 折り返し表示に切り替わる */
-    .filter-bar.expanded {
-      flex-wrap: wrap;
-      overflow-x: visible;
-    }
-
-    .filter-toggle-btn {
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      width: 44px; height: 44px;
-      border-radius: 50%;
-      border: 1.5px solid var(--border);
-      background: var(--surface-strong);
-      color: var(--text-secondary);
-      font-size: 15px;
-    }
-    .filter-toggle-btn.active { border-color: var(--accent); color: var(--accent-strong); }
 
     .game-chip.chip-all {
       flex-shrink: 0;
@@ -276,14 +256,6 @@
     font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
     display: flex; justify-content: space-between;
   }
-  .load-more-btn {
-    display: block; width: 100%; margin-top: 14px;
-    padding: 11px 0; border: 1.5px solid var(--accent); border-radius: var(--radius-md);
-    background: var(--accent-soft); color: var(--accent-strong);
-    font-weight: 700; font-size: 13px; text-align: center;
-    transition: background .15s ease, color .15s ease;
-  }
-  .load-more-btn:hover { background: var(--accent); color: #fff; }
 
   /* ---------- スマホ版：サムネイル一覧を2列表示に ---------- */
   @media (max-width: 640px) {
@@ -394,10 +366,7 @@
     </div>
   </div>
   <div class="filter-bar-wrap">
-    <div class="filter-bar-row">
-      <div class="filter-bar" id="filterBar"></div>
-      <button class="filter-toggle-btn" id="filterToggleBtn" type="button" aria-label="もっと見る" title="もっと見る">▾</button>
-    </div>
+    <div class="filter-bar" id="filterBar"></div>
   </div>
 </header>
 
@@ -457,8 +426,9 @@ let activeGames = new Set(GAMES.map(g => g.id));
 let popularRange = '24'; // 24 | 7 | 30
 
 /* ▼サムネイルの初期表示件数の設定 ==========================
-   ・popular（人気動画）/ latest（新着動画）は、最初は12個までにして、
-     「もっと見る」を押したら残り全部を表示します。
+   ・popular（人気動画）/ latest（新着動画）は、トップページでは
+     最初の12個までを表示します。それ以上見たい場合は、各セクション
+     右上の「もっと見る ›」から一覧ページ（list.html）に進んでください。
    ・live（配信）は「できるだけ全部見せたい」という方針のため、
      初期表示は無制限（Infinity）にしています。
      もし配信も件数を制限したい場合は、下の live の値を
@@ -469,8 +439,6 @@ const INITIAL_DISPLAY_LIMITS = {
   popular: 12,
   latest: 12,
 };
-// 「もっと見る」を押した後、そのセクションを展開済みにするためのフラグ
-let expandedSections = { live: false, popular: false, latest: false };
 
 function loadSectionOrderList(){
   try {
@@ -501,22 +469,14 @@ function updateNoteHtml(kind){
   return `<p class="update-note">🔄 ${freshLabel}（最終更新：${lastLabel}）</p>`;
 }
 
-// list（配列）を「初期表示の上限」に合わせて切り出し、必要なら「もっと見る」ボタンを付けて
-// card-grid のHTMLを組み立てる共通関数。sectionKey は 'live' | 'popular' | 'latest'
-function cardGridWithLoadMoreHtml(list, cardFn, sectionKey, emptyMessage){
+// list（配列）を「初期表示の上限」までに切り出して card-grid のHTMLを組み立てる関数。
+// 上限を超えた分はここでは表示しない（続きは各セクションの「もっと見る ›」から list.html で見る）。
+// sectionKey は 'live' | 'popular' | 'latest'
+function cardGridCappedHtml(list, cardFn, sectionKey, emptyMessage){
   if (!list.length) return `<div class="card-grid">${emptyHtml(emptyMessage)}</div>`;
-
   const limit = INITIAL_DISPLAY_LIMITS[sectionKey];
-  const isLimited = Number.isFinite(limit) && list.length > limit;
-  const showAll = !isLimited || expandedSections[sectionKey];
-  const visibleList = showAll ? list : list.slice(0, limit);
-
-  const gridHtml = `<div class="card-grid">${visibleList.map(cardFn).join('')}</div>`;
-  const remaining = list.length - limit;
-  const moreBtnHtml = (isLimited && !showAll)
-    ? `<button type="button" class="load-more-btn" data-expand-section="${sectionKey}">もっと見る（残り${remaining}件）</button>`
-    : '';
-  return gridHtml + moreBtnHtml;
+  const visibleList = Number.isFinite(limit) ? list.slice(0, limit) : list;
+  return `<div class="card-grid">${visibleList.map(cardFn).join('')}</div>`;
 }
 
 function renderFilterBar(){
@@ -558,7 +518,7 @@ function liveSectionHtml(list){
       <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
     </div>
     ${updateNoteHtml('live')}
-    ${cardGridWithLoadMoreHtml(list, liveCardHtml, 'live', '現在、配信中の対象アカウントはありません')}
+    ${cardGridCappedHtml(list, liveCardHtml, 'live', '現在、配信中の対象アカウントはありません')}
   </div>`;
 }
 
@@ -575,7 +535,7 @@ function popularSectionHtml(list){
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
       <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
     </div>
-    ${cardGridWithLoadMoreHtml(sorted, videoCardHtml, 'popular')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'popular')}
   </div>`;
 }
 
@@ -587,7 +547,7 @@ function latestSectionHtml(list){
       <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
     ${updateNoteHtml('video')}
-    ${cardGridWithLoadMoreHtml(sorted, videoCardHtml, 'latest')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'latest')}
   </div>`;
 }
 
@@ -698,24 +658,6 @@ document.querySelectorAll('#mobileTabbar button').forEach(btn => {
 });
 window.addEventListener('resize', renderAll);
 
-// サムネイル一覧の「もっと見る」ボタン（クリックされた時点でDOMに存在するボタンをまとめて拾う）
-document.getElementById('mainContent').addEventListener('click', (e) => {
-  const btn = e.target.closest('.load-more-btn');
-  if (!btn) return;
-  expandedSections[btn.dataset.expandSection] = true;
-  renderMainContent();
-});
-
-// スマホ版：上部ゲーム選択メニューの「もっと見る」展開ボタン
-document.getElementById('filterToggleBtn').addEventListener('click', () => {
-  const bar = document.getElementById('filterBar');
-  const btn = document.getElementById('filterToggleBtn');
-  const expanded = bar.classList.toggle('expanded');
-  btn.textContent = expanded ? '▴' : '▾';
-  btn.classList.toggle('active', expanded);
-  btn.title = expanded ? '閉じる' : 'もっと見る';
-  btn.setAttribute('aria-label', expanded ? '閉じる' : 'もっと見る');
-});
 </script>
 </body>
 </html>
