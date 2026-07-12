@@ -24,15 +24,7 @@ window.ASTRA_CONFIG = {
   // ▼管理画面の「チャンネル発掘」タブで見つけたチャンネルは、そのままここに貼り付けられます。
   //
   YOUTUBE_CHANNELS: [
-    // ★動作確認用：24時間LIVE配信しているウェザーニュース公式チャンネル
-    // 　（LIVE表示が正しく動くかのテスト用です。本番に不要になったらこの1行を削除するだけでOK）
-    // 　gameIdは「GAMESに実在するID」でないと、ゲーム絞り込みフィルターに引っかかって
-    // 　一覧から消えてしまうため、動作確認用に一旦 'genshin' を指定しています。
-    // 　※このチャンネルは下の KEYWORD_FILTER_EXEMPT_CHANNEL_IDS にも登録されているため、
-    // 　　タイトルにゲーム名が入っていなくても除外されずに表示されます。
-    { channelId: 'UCNsidkYpIAQ4QaufptQBPHQ', gameId: 'genshin', label: 'ウェザーニュース（LIVEテスト用）' },
-
-    // ↓ここから下に、実際に登録したい配信者・公式チャンネルを追加していってください
+    // ↓ここに、実際に登録したい配信者・公式チャンネルを追加していってください
     // 例）{ channelId: 'UCxxxxxxxxxxxxxxxxxxxxxx', gameId: 'genshin', label: '原神公式' },
 
     // ★各ゲームの公式チャンネル

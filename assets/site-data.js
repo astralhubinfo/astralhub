@@ -204,10 +204,6 @@
   // 例）'UCxxxxxxxxxxxxxxxxxxxxxx': 'genshin', // 原神 公式チャンネル
   //
   const OFFICIAL_CHANNELS = {
-    // ★動作確認用：24時間LIVE配信しているウェザーニュース公式チャンネル
-    // 　（LIVE表示が正しく動くかのテスト用です。本番に不要になったらこの1行を削除するだけでOK）
-    'UCNsidkYpIAQ4QaufptQBPHQ': 'genshin',
-
     // ★各ゲームの公式チャンネル
     'UCAVR6Q0YgYa8xwz8rdg9Mrg': 'genshin', // 原神 公式チャンネル
     'UCrzCIt5o0X88G9bCdrdbv6g': 'hsr',     // 崩壊：スターレイル 公式チャンネル
