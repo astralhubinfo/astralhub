@@ -125,6 +125,7 @@ const type = params.get('type') || 'news';
 const TITLES = {
   live: 'LIVE配信 一覧',
   popular: '人気動画 一覧',
+  official: '公式チャンネル 一覧',
   latest: '新着動画 一覧',
   news: '最新ニュース 一覧',
 };
@@ -133,6 +134,7 @@ document.getElementById('pageTitle').innerHTML =
 
 let activeGames = new Set(GAMES.map(g => g.id));
 let popularRange = '24'; // 人気動画のみ使用
+let officialTab = 'latest'; // 'latest'（新着順）| 'popular'（人気＝7日間の再生数順）
 
 function renderFilterBar(){
   const allActive = activeGames.size === GAMES.length;
@@ -163,6 +165,11 @@ function renderContent(){
   const el = document.getElementById('listContent');
   const subTabsEl = document.getElementById('subTabs');
 
+  // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
+  // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は「公式チャンネル」一覧にまとめる。
+  const officialVideos = videos.filter(v => v.isOfficial);
+  const generalVideos = videos.filter(v => !v.isOfficial);
+
   if (type === 'live') {
     subTabsEl.innerHTML = '';
     el.innerHTML = `<div class="card-grid">${live.length ? live.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>`;
@@ -178,14 +185,35 @@ function renderContent(){
     document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
       btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderContent(); });
     });
-    const sorted = [...videos].sort((a,b) => b.views - a.views);
+    const sorted = [...generalVideos].sort((a,b) => b.views - a.views);
     el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
+    return;
+  }
+
+  if (type === 'official') {
+    subTabsEl.innerHTML = `<div class="pill-tabs">
+      <button class="pill-tab ${officialTab==='latest'?'active':''}" data-official-tab="latest">新着</button>
+      <button class="pill-tab ${officialTab==='popular'?'active':''}" data-official-tab="popular">人気（7日間）</button>
+    </div>`;
+    document.querySelectorAll('.pill-tab[data-official-tab]').forEach(btn => {
+      btn.addEventListener('click', () => { officialTab = btn.dataset.officialTab; renderContent(); });
+    });
+    let sorted;
+    if (officialTab === 'popular') {
+      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      sorted = officialVideos
+        .filter(v => new Date(v.publishedAt).getTime() >= sevenDaysAgoMs)
+        .sort((a,b) => b.views - a.views);
+    } else {
+      sorted = [...officialVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    }
+    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml('公式チャンネルの動画がありません')}</div>`;
     return;
   }
 
   if (type === 'latest') {
     subTabsEl.innerHTML = '';
-    const sorted = [...videos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    const sorted = [...generalVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
     return;
   }
@@ -222,7 +250,7 @@ function newsItemWithSummaryHtml(item){
 // 「LIVE配信」「新着動画」「人気動画」は自動取得の対象なので、更新頻度・最終更新時刻を表示する
 function renderUpdateNote(){
   const noteEl = document.getElementById('updateNote');
-  if (type !== 'live' && type !== 'latest' && type !== 'popular') { noteEl.textContent = ''; return; }
+  if (type !== 'live' && type !== 'latest' && type !== 'popular' && type !== 'official') { noteEl.textContent = ''; return; }
   const { lastFetchAt, liveCacheMinutes, videoCacheMinutes } = getYoutubeUpdateInfo();
   const cacheMinutes = type === 'live' ? liveCacheMinutes : videoCacheMinutes;
   const freshLabel = cacheMinutes === 0

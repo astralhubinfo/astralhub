@@ -214,6 +214,10 @@
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 14px;
   }
+  /* 公式チャンネル枠専用：件数に関わらず、常に横1列（1行）に固定表示する */
+  .card-grid.official-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
   .media-card { min-width: 0; }
   .media-thumb {
     position: relative; width: 100%; border-radius: var(--radius-md);
@@ -263,6 +267,10 @@
     .card-grid {
       grid-template-columns: repeat(2, 1fr);
       gap: 10px;
+    }
+    /* 公式チャンネル枠：スマホでも常に1行（2個）に固定する */
+    .card-grid.official-grid {
+      grid-template-columns: repeat(2, 1fr);
     }
     .card-title { font-size: 12px; }
     .card-meta { font-size: 10px; }
@@ -424,34 +432,53 @@ const {
    ========================================================= */
 let activeGames = new Set(GAMES.map(g => g.id));
 let popularRange = '24'; // 24 | 7 | 30
+let officialTab = 'latest'; // 'latest'（新着順）| 'popular'（人気＝7日間の再生数順）
 
 /* ▼サムネイルの初期表示件数の設定 ==========================
    ・popular（人気動画）/ latest（新着動画）は、トップページでは
-     最初の12個までを表示します。それ以上見たい場合は、各セクション
+     パソコン表示では最初の12個まで、スマホ表示（画面幅640px以下）
+     では2×2の4個までを表示します。それ以上見たい場合は、各セクション
      右上の「もっと見る ›」から一覧ページ（list.html）に進んでください。
+   ・official（公式チャンネル）は投稿頻度が少ないため、パソコン表示・
+     スマホ表示のどちらでも「常に1行だけ」になるように、CSS側の列数
+     （.official-grid）と合わせた個数にしてあります
+     （パソコン：4個＝1行、スマホ：2個＝1行）。
    ・live（配信）は「できるだけ全部見せたい」という方針のため、
      初期表示は無制限（Infinity）にしています。
      もし配信も件数を制限したい場合は、下の live の値を
      Infinity から 24 や 30 などの数字に書き換えてください。
    ============================================================ */
-const INITIAL_DISPLAY_LIMITS = {
+const INITIAL_DISPLAY_LIMITS = { // パソコン表示用
   live: Infinity,
   popular: 12,
+  official: 4,  // CSSの .official-grid（パソコン：4列）と合わせる
   latest: 12,
 };
+const MOBILE_DISPLAY_LIMITS = { // スマホ表示用（画面幅640px以下）
+  live: Infinity,
+  popular: 4,
+  official: 2,  // CSSの .official-grid（スマホ：2列）と合わせる
+  latest: 4,
+};
+// 今の画面幅を見て「スマホ用の件数」か「パソコン用の件数」かを切り替える関数
+function getDisplayLimit(sectionKey){
+  const isMobile = window.innerWidth <= 640; // 640px以下＝スマホ表示とみなす
+  return isMobile ? MOBILE_DISPLAY_LIMITS[sectionKey] : INITIAL_DISPLAY_LIMITS[sectionKey];
+}
 
+const SECTION_ORDER_KEYS = ['live', 'popular', 'official', 'latest'];
 function loadSectionOrderList(){
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.sectionOrder);
     const arr = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(arr) && arr.length === 3 && ['live','popular','latest'].every(k => arr.includes(k))) return arr;
+    if (Array.isArray(arr) && arr.length === SECTION_ORDER_KEYS.length && SECTION_ORDER_KEYS.every(k => arr.includes(k))) return arr;
   } catch (e) { /* 保存できない/壊れている場合は既定値を使う */ }
-  return ['live', 'popular', 'latest'];
+  return ['live', 'popular', 'official', 'latest'];
 }
 function saveSectionOrderList(arr){
   try { localStorage.setItem(STORAGE_KEYS.sectionOrder, JSON.stringify(arr)); } catch (e) { /* 無視 */ }
 }
-let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','latest']
+let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','official','latest']
 let mobileTab = 'main';
 
 /* =========================================================
@@ -471,12 +498,14 @@ function updateNoteHtml(kind){
 
 // list（配列）を「初期表示の上限」までに切り出して card-grid のHTMLを組み立てる関数。
 // 上限を超えた分はここでは表示しない（続きは各セクションの「もっと見る ›」から list.html で見る）。
-// sectionKey は 'live' | 'popular' | 'latest'
-function cardGridCappedHtml(list, cardFn, sectionKey, emptyMessage){
-  if (!list.length) return `<div class="card-grid">${emptyHtml(emptyMessage)}</div>`;
-  const limit = INITIAL_DISPLAY_LIMITS[sectionKey];
+// sectionKey は 'live' | 'popular' | 'official' | 'latest'
+// extraClass は card-grid に追加したいクラス名（例：公式チャンネル枠の 'official-grid'）。省略可。
+function cardGridCappedHtml(list, cardFn, sectionKey, emptyMessage, extraClass){
+  const gridClass = extraClass ? `card-grid ${extraClass}` : 'card-grid';
+  if (!list.length) return `<div class="${gridClass}">${emptyHtml(emptyMessage)}</div>`;
+  const limit = getDisplayLimit(sectionKey); // 画面幅（パソコン／スマホ）に応じた表示件数
   const visibleList = Number.isFinite(limit) ? list.slice(0, limit) : list;
-  return `<div class="card-grid">${visibleList.map(cardFn).join('')}</div>`;
+  return `<div class="${gridClass}">${visibleList.map(cardFn).join('')}</div>`;
 }
 
 function renderFilterBar(){
@@ -551,19 +580,54 @@ function latestSectionHtml(list){
   </div>`;
 }
 
+// ▼公式チャンネル専用の枠。人気動画・新着動画には公式チャンネルの動画は出さず、
+//   ここに1本化する。タブで「新着順」⇔「人気（7日間の再生数）順」を切り替えられる。
+//   投稿頻度が少ないため、表示は常に1行だけ（CSSの .official-grid と件数を合わせてある）。
+function officialSectionHtml(list){
+  let sorted;
+  if (officialTab === 'popular') {
+    const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    sorted = list
+      .filter(v => new Date(v.publishedAt).getTime() >= sevenDaysAgoMs)
+      .sort((a,b) => b.views - a.views);
+  } else {
+    sorted = [...list].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  }
+  return `<div class="panel" id="official-section">
+    <div class="panel-head">
+      <span class="panel-title">公式チャンネル</span>
+      <a class="panel-more" href="list.html?type=official">もっと見る ›</a>
+    </div>
+    ${updateNoteHtml('video')}
+    <div class="pill-tabs" style="margin-bottom:14px;">
+      <button class="pill-tab ${officialTab==='latest'?'active':''}" data-official-tab="latest">新着</button>
+      <button class="pill-tab ${officialTab==='popular'?'active':''}" data-official-tab="popular">人気（7日間）</button>
+    </div>
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'official', '公式チャンネルの動画がありません', 'official-grid')}
+  </div>`;
+}
+
 function renderMainContent(){
   const el = document.getElementById('mainContent');
   const { live: fLive, videos: fVideos } = getFilteredData(activeGames);
+  // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
+  // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は下の「公式チャンネル」枠にまとめる。
+  const officialVideos = fVideos.filter(v => v.isOfficial);
+  const generalVideos = fVideos.filter(v => !v.isOfficial);
 
   const blocks = {
     live: liveSectionHtml(fLive),
-    popular: popularSectionHtml(fVideos),
-    latest: latestSectionHtml(fVideos),
+    popular: popularSectionHtml(generalVideos),
+    official: officialSectionHtml(officialVideos),
+    latest: latestSectionHtml(generalVideos),
   };
   el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('');
 
   document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
     btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
+  });
+  document.querySelectorAll('.pill-tab[data-official-tab]').forEach(btn => {
+    btn.addEventListener('click', () => { officialTab = btn.dataset.officialTab; renderMainContent(); });
   });
 }
 

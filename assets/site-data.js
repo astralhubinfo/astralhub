@@ -25,11 +25,11 @@
     { id:'sample-live-5', game:'nte',     title:'[サンプル] 探索テスト 配信中！', channel:'NTE公式', viewers: 2111 },
   ];
   const SAMPLE_VIDEOS = [
-    { id:'sample-video-1', game:'genshin', title:'[サンプル] Ver.6.2で絶対やるべきこと5選', channel:'原神公式', views: 287000, duration:'5:24', minutesAgo: 40 },
-    { id:'sample-video-2', game:'hsr',     title:'[サンプル] 2.3速報！新キャラの性能解説', channel:'スターレイル攻略ch', views: 213000, duration:'3:40', minutesAgo: 90 },
-    { id:'sample-video-3', game:'zzz',     title:'[サンプル] 新キャラ性能解説｜おすすめ編成', channel:'ZZZ攻略部', views: 189000, duration:'6:18', minutesAgo: 130 },
-    { id:'sample-video-4', game:'ww',      title:'[サンプル] キャラ完全解説｜おすすめ武器・編成', channel:'鳴潮研究所', views: 124000, duration:'4:57', minutesAgo: 220 },
-    { id:'sample-video-5', game:'nte',     title:'[サンプル] NTEの世界を10分で紹介', channel:'NTE公式', views: 98000, duration:'3:33', minutesAgo: 300 },
+    { id:'sample-video-1', game:'genshin', title:'[サンプル] Ver.6.2で絶対やるべきこと5選', channel:'原神公式', isOfficial: true,  views: 287000, duration:'5:24', minutesAgo: 40 },
+    { id:'sample-video-2', game:'hsr',     title:'[サンプル] 2.3速報！新キャラの性能解説', channel:'スターレイル攻略ch', isOfficial: false, views: 213000, duration:'3:40', minutesAgo: 90 },
+    { id:'sample-video-3', game:'zzz',     title:'[サンプル] 新キャラ性能解説｜おすすめ編成', channel:'ZZZ攻略部', isOfficial: false, views: 189000, duration:'6:18', minutesAgo: 130 },
+    { id:'sample-video-4', game:'ww',      title:'[サンプル] キャラ完全解説｜おすすめ武器・編成', channel:'鳴潮研究所', isOfficial: false, views: 124000, duration:'4:57', minutesAgo: 220 },
+    { id:'sample-video-5', game:'nte',     title:'[サンプル] NTEの世界を10分で紹介', channel:'NTE公式', isOfficial: true,  views: 98000, duration:'3:33', minutesAgo: 300 },
   ];
 
   function sampleToTimestamped(list){
@@ -388,6 +388,9 @@
       game: chConf.gameId,
       source: 'youtube-auto',
       channelId: chConf.channelId,
+      // ★追加：OFFICIAL_CHANNELSに登録されているチャンネルかどうかの目印。
+      // これがtrueの動画は「人気動画」「新着動画」には出さず、「公式チャンネル」枠にのみ表示する。
+      isOfficial: Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, chConf.channelId),
       url: 'https://www.youtube.com/watch?v=' + videoId,
       title: playlistItem.snippet.title,
       channel: playlistItem.snippet.channelTitle,

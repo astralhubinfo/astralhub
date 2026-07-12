@@ -102,6 +102,7 @@ window.ASTRA_CONFIG = {
   SECTION_LABELS: {
     live: '配信（LIVE）',
     popular: '人気動画',
+    official: '公式チャンネル',
     latest: '新着動画',
   },
   STORAGE_KEYS: {
