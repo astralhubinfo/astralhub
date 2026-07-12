@@ -291,27 +291,28 @@
     return all;
   }
 
-  // サムネイルの縦横サイズを取得する（アスペクト比の判定に使う）
-  function ytGetThumbSize(detail){
-    const thumbs = detail && detail.snippet && detail.snippet.thumbnails;
-    const t = thumbs && (thumbs.maxres || thumbs.high || thumbs.medium || thumbs.default);
-    return (t && t.width && t.height) ? { width: t.width, height: t.height } : null;
-  }
-
-  // YouTubeショートの判定：config.js の SHORTS_FILTER.MAX_DURATION_SECONDS（既定3分）以下で、
-  // かつ縦長・正方形の動画をショート扱いとする。サムネイルの縦横が取得できない場合は60秒以下のみ対象とする（安全側）
+  // YouTubeショートの判定：以下のどちらかに当てはまる動画をショートとみなして除外する。
+  //   ①動画の長さが config.js の SHORTS_FILTER.MAX_DURATION_SECONDS（既定1分）以下
+  //   ②タイトルに config.js の SHORTS_FILTER.TITLE_KEYWORDS（例：'#shorts'）のいずれかが含まれる
+  //     → 投稿者自身が「これはショートです」と示している目印なので、長さに関係なく確実に除外する
+  //
+  // 【修正メモ】以前はサムネイル画像の縦横比（縦長かどうか）でも判定していましたが、
+  // YouTube側から返ってくるサムネイル情報は、実際はショート動画（縦型）であっても
+  // ほとんどの場合「横長」のデータとして返ってくるという癖があり、この判定が正しく機能していませんでした。
+  // そのため、「動画の長さ」と「タイトルの目印」の2つで判定するように変更しています。
   function ytIsShort(detail){
+    const shortsConf = window.ASTRA_CONFIG.SHORTS_FILTER || {};
+    const title = (detail && detail.snippet && detail.snippet.title || '').toLowerCase();
+    const titleKeywords = shortsConf.TITLE_KEYWORDS || [];
+    const hasShortsKeyword = titleKeywords.some(kw => title.includes(String(kw).toLowerCase()));
+    if (hasShortsKeyword) return true;
+
     const iso = detail && detail.contentDetails && detail.contentDetails.duration;
     if (!iso) return false;
     const totalSeconds = ytDurationToSeconds(iso);
-    const shortsConf = window.ASTRA_CONFIG.SHORTS_FILTER || {};
-    const maxShortSeconds = typeof shortsConf.MAX_DURATION_SECONDS === 'number' ? shortsConf.MAX_DURATION_SECONDS : 180;
-    if (totalSeconds <= 0 || totalSeconds > maxShortSeconds) return false;
-
-    const size = ytGetThumbSize(detail);
-    if (size) return size.height >= size.width; // 縦長・正方形ならショート
-
-    return totalSeconds <= 60;
+    const maxShortSeconds = typeof shortsConf.MAX_DURATION_SECONDS === 'number' ? shortsConf.MAX_DURATION_SECONDS : 60;
+    if (totalSeconds <= 0) return false;
+    return totalSeconds <= maxShortSeconds;
   }
 
   // 「配信中」かどうかは、動画詳細のliveBroadcastContentで確認する
