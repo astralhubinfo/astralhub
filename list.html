@@ -195,8 +195,13 @@ function renderContent(){
     document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
       btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderContent(); });
     });
-    const sorted = [...generalVideos].sort((a,b) => b.views - a.views);
-    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
+    // 選んだ期間内に「投稿された」動画だけを対象に、再生数順で並べる
+    const hoursMap = { '24': 24, '7': 24 * 7, '30': 24 * 30 };
+    const cutoffMs = Date.now() - (hoursMap[popularRange] || 24) * 60 * 60 * 1000;
+    const filtered = generalVideos.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
+    const sorted = [...filtered].sort((a,b) => b.views - a.views);
+    const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
+    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml(`${rangeLabel}以内に投稿された動画がありません`)}</div>`;
     return;
   }
 

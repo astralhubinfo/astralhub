@@ -601,8 +601,21 @@ function liveSectionHtml(list){
   </div>`;
 }
 
+// 「人気動画」の期間タブ（24時間／7日間／30日間）用：
+// その期間内に「投稿された」動画だけを対象にする（パターンA方式）。
+// 将来的に「その期間内でどれだけ再生数が伸びたか」で判定する方式（パターンB）に変える場合は、
+// ここではなくYouTubeデータ取得側で再生数の履歴を記録する仕組みが別途必要になります。
+function filterByPopularRange(list, range){
+  const hoursMap = { '24': 24, '7': 24 * 7, '30': 24 * 30 };
+  const hours = hoursMap[range] || 24;
+  const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+  return list.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
+}
+
 function popularSectionHtml(list){
-  const sorted = [...list].sort((a,b) => b.views - a.views);
+  const filtered = filterByPopularRange(list, popularRange);
+  const sorted = [...filtered].sort((a,b) => b.views - a.views);
+  const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
   return `<div class="panel" id="popular-section">
     <div class="panel-head">
       <span class="panel-title">人気動画</span>
@@ -614,7 +627,7 @@ function popularSectionHtml(list){
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
       <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
     </div>
-    ${cardGridCappedHtml(sorted, videoCardHtml, 'popular')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'popular', `${rangeLabel}以内に投稿された動画がありません`)}
   </div>`;
 }
 
