@@ -82,9 +82,44 @@
   .discover-meta { font-size:11.5px; color: var(--text-secondary); }
   .discover-id { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); }
   #discoverOutput { font-family: var(--font-mono); font-size:12px; min-height:140px; resize:vertical; }
+
+  /* ▼ログイン画面（パスワード保護） */
+  .auth-gate {
+    position: fixed; inset: 0; background: var(--page-bg); z-index: 999;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .auth-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 32px 28px; width: 100%; max-width: 320px; text-align: center;
+  }
+  .auth-box .auth-icon { font-size: 28px; margin-bottom: 10px; }
+  .auth-box h2 { margin: 0 0 6px; font-size: 16px; }
+  .auth-box p { font-size: 12px; color: var(--text-faint); margin: 0 0 20px; line-height: 1.6; }
+  .auth-box input {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    margin-bottom: 12px; font-size: 14px; text-align: center; box-sizing: border-box;
+  }
+  .auth-box button {
+    width: 100%; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-md);
+    padding: 11px; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .auth-box button:hover { background: var(--accent-strong); }
+  .auth-error { color: var(--live); font-size: 12px; margin-top: 12px; display: none; }
 </style>
 </head>
 <body>
+
+<!-- ▼ログイン画面（パスワードが合うまで管理画面の中身は表示されません） -->
+<div class="auth-gate" id="authGate">
+  <div class="auth-box">
+    <div class="auth-icon">🔒</div>
+    <h2>管理画面ログイン</h2>
+    <p>パスワードを入力してください</p>
+    <input type="password" id="authPasswordInput" placeholder="パスワード" autocomplete="off">
+    <button id="authSubmitBtn">ログイン</button>
+    <div class="auth-error" id="authError">パスワードが違います</div>
+  </div>
+</div>
 
 <header class="site-header">
   <div class="header-inner">
@@ -103,7 +138,7 @@
 
 <script src="assets/config.js"></script>
 <script>
-const { GAMES, CATEGORY_LABEL, STORAGE_KEYS } = window.ASTRA_CONFIG;
+const { GAMES, CATEGORY_LABEL, STORAGE_KEYS, ADMIN_PASSWORD_HASH } = window.ASTRA_CONFIG;
 
 const TYPES = {
   news: {
@@ -344,8 +379,49 @@ function renderTabContent(){
   });
 }
 
-renderTabBar();
-renderTabContent();
+// ▼ここから追加：パスワード保護（ログイン画面） ============================================
+// 「管理画面の中身を表示する処理（renderTabBar・renderTabContent）」は、
+// 正しいパスワードが入力されるまで一切実行されません。
+const AUTH_SESSION_KEY = 'astra_admin_authed';
+
+// 入力された文字列を、config.js に保存されているのと同じ方式（SHA-256）で暗号化する
+async function sha256Hex(text){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function unlockAdmin(){
+  document.getElementById('authGate').style.display = 'none';
+  renderTabBar();
+  renderTabContent();
+}
+
+async function tryLogin(){
+  const input = document.getElementById('authPasswordInput');
+  const errorEl = document.getElementById('authError');
+  const hash = await sha256Hex(input.value);
+  if (hash === ADMIN_PASSWORD_HASH) {
+    // このタブを閉じるまでは再入力不要にする（ブラウザを閉じる・新しいタブで開くと再度必要）
+    try { sessionStorage.setItem(AUTH_SESSION_KEY, '1'); } catch (e) {}
+    unlockAdmin();
+  } else {
+    errorEl.style.display = 'block';
+    input.value = '';
+    input.focus();
+  }
+}
+
+document.getElementById('authSubmitBtn').addEventListener('click', tryLogin);
+document.getElementById('authPasswordInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') tryLogin();
+});
+document.getElementById('authPasswordInput').focus();
+
+// すでに同じタブ内でログイン済みなら、再入力なしでそのまま表示する
+if (sessionStorage.getItem(AUTH_SESSION_KEY) === '1') {
+  unlockAdmin();
+}
+// ▲ここまで追加 ============================================
 
 // ▼ここから追加：チャンネル発掘機能（半自動化） ============================================
 // 役割：管理者がキーワードを入力すると、YouTubeのsearch API（type=channel）で候補チャンネルを探し、
