@@ -394,6 +394,28 @@
     display: flex; align-items: center; justify-content: center;
   }
   .order-btn:disabled { opacity: 0.3; cursor: default; }
+
+  /* ---------- Site intro（トップページの紹介文） ---------- */
+  .site-intro {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 2px 20px 16px;
+  }
+  .site-intro-catch {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin: 0 0 4px;
+  }
+  .site-intro-text {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-faint);
+    margin: 0;
+  }
+  @media (max-width: 900px) {
+    .site-intro { padding: 2px 14px 12px; }
+  }
 </style>
 </head>
 <body>
@@ -419,6 +441,11 @@
     <div class="filter-bar" id="filterBar"></div>
   </div>
 </header>
+
+<section class="site-intro">
+  <p class="site-intro-catch">探す時間を、見る時間へ。</p>
+  <p class="site-intro-text">AstralHubは、原神・崩壊スターレイル・ゼンレスゾーンゼロ・鳴潮・NTEなど人気ゲームの生放送・動画・最新ニュースをまとめてチェックできる情報サイトです。あちこちのサイトを探し回る時間をなくし、見たい瞬間にすぐたどり着けることを目指しています。</p>
+</section>
 
 <div class="page">
   <main id="mainContent"></main>
