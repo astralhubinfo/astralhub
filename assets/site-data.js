@@ -73,6 +73,19 @@
 
   function gameById(id){ return window.ASTRA_CONFIG.GAMES.find(g => g.id === id); }
 
+  // ゲームの「略称」の一覧。ここに登録したゲームは必ずこの表記で表示される。
+  // 登録されていないゲームは、ゲーム名の先頭3文字を自動的に使う（config.jsに新しいゲームを追加した際、
+  // ここに追記しなくても最低限の表示崩れは起きないようにするための保険）。
+  const GAME_SHORT_NAME = {
+    hsr: '崩スタ',
+    zzz: 'ZZZ',
+  };
+  function shortNameFor(g){
+    if (!g) return '';
+    if (Object.prototype.hasOwnProperty.call(GAME_SHORT_NAME, g.id)) return GAME_SHORT_NAME[g.id];
+    return g.name.length <= 3 ? g.name : g.name.slice(0, 3);
+  }
+
   function timeAgoLabel(publishedAt){
     const min = Math.max(0, Math.floor((Date.now() - new Date(publishedAt).getTime()) / 60000));
     if (min < 60) return min + '分前';
@@ -89,16 +102,17 @@
     return `<div class="empty-state">${msg || '該当する情報がありません。ゲームフィルターの選択をご確認ください。'}</div>`;
   }
 
-  // ゲームアイコン画像。読み込みに失敗した場合はテキスト表示に自動で切り替わる。
-  function gameIconImgHtml(g, sizeClass){
-    return `<img src="${g.icon}" alt="${g.name}" class="game-icon ${sizeClass || ''}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'game-icon-fallback ${sizeClass || ''}',textContent:'${g.name.slice(0,2)}'}))">`;
+  // ゲームアイコン（文字表示版）。画像は使わず、略称の文字だけを色付きバッジで表示する。
+  // サイズは sizeClass（icon-sm / icon-md）とCSS側の固定サイズ指定によって、どのゲームでも統一される。
+  function gameIconTextHtml(g, sizeClass){
+    return `<span class="game-icon-text ${sizeClass || ''}" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>`;
   }
 
   function liveCardHtml(item){
     const g = gameById(item.game);
     const thumbInner = item.thumbnail
       ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
-      : gameIconImgHtml(g, 'icon-md');
+      : gameIconTextHtml(g, 'icon-md');
     const thumbTag = item.url ? 'a' : 'div';
     const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
     return `<div class="media-card">
@@ -106,7 +120,7 @@
         <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
         ${thumbInner}
       </${thumbTag}>
-      <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
+      <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span></div>
     </div>`;
@@ -116,7 +130,7 @@
     const g = gameById(item.game);
     const thumbInner = item.thumbnail
       ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
-      : gameIconImgHtml(g, 'icon-md');
+      : gameIconTextHtml(g, 'icon-md');
     const thumbTag = item.url ? 'a' : 'div';
     const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
     return `<div class="media-card">
@@ -124,7 +138,7 @@
         <span class="badge-duration">${item.duration}</span>
         ${thumbInner}
       </${thumbTag}>
-      <div class="card-tag-row"><span class="tag" style="background:${g.color}">${g.name}</span></div>
+      <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
     </div>`;
@@ -135,13 +149,13 @@
     const inner = `
       <div class="news-body">
         <div class="card-tag-row">
-          <span class="tag" style="background:${g.color}">${g.name}</span>
+          <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
           <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
         </div>
         <p class="news-title">${item.title}</p>
         <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
       </div>
-      <div class="news-thumb" style="${thumbStyle(g)}">${gameIconImgHtml(g, 'icon-sm')}</div>
+      <div class="news-thumb" style="${thumbStyle(g)}">${gameIconTextHtml(g, 'icon-sm')}</div>
     `;
     if (item.id) {
       return `<a class="news-item" href="article.html?id=${encodeURIComponent(item.id)}">${inner}</a>`;
@@ -550,7 +564,7 @@
   // ▲ここまで追加 ============================================
 
   window.ASTRA_DATA = {
-    gameById, timeAgoLabel, thumbStyle, emptyHtml,
+    gameById, timeAgoLabel, thumbStyle, emptyHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml,
     getFilteredData, findNewsById,
     refreshYouTubeData, getYoutubeUpdateInfo,

@@ -159,7 +159,6 @@
   .game-chip .chip-label {
     overflow: hidden; text-overflow: ellipsis;
   }
-  .chip-icon-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .chip-icon-fallback { position: relative; z-index: 1; }
 
   /* ---------- Page ---------- */
@@ -267,12 +266,13 @@
   .media-thumb.portrait { aspect-ratio: 3/4; }
   .media-thumb.landscape { aspect-ratio: 16/9; }
   .media-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .game-icon { object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
-  .game-icon.icon-md { width: 48px; height: 48px; }
-  .game-icon.icon-sm { max-width: 65%; max-height: 65%; }
-  .game-icon-fallback { color: #fff; font-weight: 900; }
-  .game-icon-fallback.icon-md { font-size: 20px; }
-  .game-icon-fallback.icon-sm { font-size: 15px; }
+  .game-icon-text {
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 900; text-align: center; line-height: 1;
+    border-radius: var(--radius-sm); letter-spacing: -0.02em;
+  }
+  .game-icon-text.icon-md { width: 48px; height: 48px; font-size: 14px; }
+  .game-icon-text.icon-sm { width: 34px; height: 34px; font-size: 11px; }
   .badge-viewers {
     position: absolute; top: 7px; left: 7px;
     background: rgba(226,61,61,0.92); color: #fff;
@@ -292,6 +292,7 @@
     color: #fff; white-space: nowrap;
   }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
+  .tag.tag-game { display: inline-block; min-width: 42px; text-align: center; }
   .card-title {
     font-size: 13px; font-weight: 500; margin: 0 0 4px; line-height: 1.4;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -437,6 +438,7 @@
   <div class="footer-inner">
     <span>&copy; 2026 AstralHub</span>
     <a href="contact.html">管理人への問い合わせ</a>
+    <a href="privacy.html">プライバシーポリシー</a>
   </div>
 </footer>
 
@@ -565,12 +567,9 @@ function renderFilterBar(){
   html += GAMES.map(g => {
     const active = activeGames.has(g.id);
     const initial = (g.name || '?').charAt(0);
-    const iconInner = g.icon
-      ? `<img class="chip-icon-img" src="${g.icon}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.removeProperty('display');"><span class="chip-icon-fallback" style="display:none;">${initial}</span>`
-      : `<span class="chip-icon-fallback">${initial}</span>`;
     return `<button class="game-chip ${active?'active':''}" data-game="${g.id}" title="${g.name}">
       <span class="chip-icon-wrap" style="background:${g.color}">
-        ${iconInner}
+        <span class="chip-icon-fallback">${initial}</span>
       </span>
       <span class="chip-label">${chipLabelFor(g)}</span>
     </button>`;
