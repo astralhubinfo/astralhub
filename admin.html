@@ -224,6 +224,7 @@ function showToast(msg){
 function renderTabBar(){
   const tabs = [
     ...Object.keys(TYPES).map(key => ({ key, label: TYPES[key].label })),
+    { key: 'bulkImport', label: 'URL一括登録' },
     { key: 'discover', label: 'チャンネル発掘' },
   ];
   document.getElementById('tabBar').innerHTML = tabs.map(t =>
@@ -257,6 +258,7 @@ function fieldHtml(f){
 
 function renderTabContent(){
   if (activeType === 'discover') { renderDiscoverTab(); return; }
+  if (activeType === 'bulkImport') { renderBulkImportTab(); return; }
   const type = TYPES[activeType];
   const items = loadItems(activeType);
   const isEditing = editingIndex !== null && items[editingIndex];
@@ -602,6 +604,216 @@ function handleDiscoverCopy(){
     document.execCommand('copy');
     showToast('コピーしました');
   }
+}
+// ▲ここまで追加 ============================================
+
+// ▼ここから追加：URL一括登録機能（まとめテキストからチャンネルURLを抽出してインポート） ============================================
+// 役割：外部サイトのコピペテキストなどから、YouTubeチャンネルのURLを正規表現で一括抽出し、
+//       チェックしたものだけをまとめて「チャンネル登録（手動）」と同じ保存先（LocalStorage）に追加する。
+// ポイント：
+//   - /channel/UC... 形式のURLはチャンネルIDがそのまま含まれているため、API消費ゼロで使える。
+//     名前の確認だけ、まとめて1回の問い合わせ（最大50件ずつ）で行う（通常の検索の100分の1未満のコスト）。
+//   - /@ハンドル名 形式のURLは、本物のチャンネルIDに変換するための問い合わせが1件につき1回必要になるが、
+//     それでも「キーワード検索」に比べると1件あたりのコストは非常に小さい。
+
+let bulkImportResults = []; // {channelId, title, thumbnail, checked, alreadyExists, failed}の配列
+
+// テキストの中からYouTubeチャンネルのURLを抜き出す（重複は除く）
+function extractYouTubeChannelRefs(text){
+  const refs = [];
+  const seen = new Set();
+
+  const idRegex = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})/g;
+  const handleRegex = /(?:https?:\/\/)?(?:www\.)?youtube\.com\/@([A-Za-z0-9_.-]{2,30})/g;
+
+  let m;
+  while ((m = idRegex.exec(text))) {
+    const key = 'id:' + m[1];
+    if (!seen.has(key)) { seen.add(key); refs.push({ type: 'id', channelId: m[1] }); }
+  }
+  while ((m = handleRegex.exec(text))) {
+    const key = 'handle:' + m[1].toLowerCase();
+    if (!seen.has(key)) { seen.add(key); refs.push({ type: 'handle', handle: m[1] }); }
+  }
+  return refs;
+}
+
+// 抽出したURLの情報（チャンネル名など）を取得する
+async function resolveBulkImportRefs(refs, apiKey){
+  const results = [];
+  const idRefs = refs.filter(r => r.type === 'id');
+  const handleRefs = refs.filter(r => r.type === 'handle');
+
+  // /channel/UC... 形式：IDが確定しているので、名前の確認だけまとめて取得（最大50件ずつ・低コスト）
+  const titleMap = new Map();
+  for (const chunk of chunkArray(idRefs.map(r => r.channelId), 50)) {
+    if (chunk.length === 0) continue;
+    const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${chunk.join(',')}&key=${apiKey}`;
+    const data = await ytFetchJson(url);
+    (data.items || []).forEach(ch => titleMap.set(ch.id, {
+      title: (ch.snippet && ch.snippet.title) || '',
+      thumbnail: (ch.snippet && ch.snippet.thumbnails && (ch.snippet.thumbnails.default || {}).url) || '',
+    }));
+  }
+  idRefs.forEach(r => {
+    const info = titleMap.get(r.channelId);
+    results.push({
+      channelId: r.channelId,
+      title: info ? info.title : '（名前を取得できませんでした）',
+      thumbnail: info ? info.thumbnail : '',
+      failed: !info,
+    });
+  });
+
+  // /@ハンドル名 形式：1件ずつ本物のチャンネルIDに変換する
+  for (const r of handleRefs) {
+    try {
+      const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet&forHandle=${encodeURIComponent('@' + r.handle)}&key=${apiKey}`;
+      const data = await ytFetchJson(url);
+      const item = (data.items || [])[0];
+      if (item) {
+        results.push({
+          channelId: item.id,
+          title: (item.snippet && item.snippet.title) || ('@' + r.handle),
+          thumbnail: (item.snippet && item.snippet.thumbnails && (item.snippet.thumbnails.default || {}).url) || '',
+          failed: false,
+        });
+      } else {
+        results.push({ channelId: null, title: '@' + r.handle + '（見つかりませんでした）', thumbnail: '', failed: true });
+      }
+    } catch (e) {
+      results.push({ channelId: null, title: '@' + r.handle + '（取得エラー）', thumbnail: '', failed: true });
+    }
+  }
+  return results;
+}
+
+function renderBulkImportTab(){
+  const html = `
+    <div class="panel">
+      <h2>まとめテキストからチャンネルを一括登録</h2>
+      <p class="hint">
+        外部のまとめサイトやランキングページなどをコピーして、下の欄にそのまま貼り付けてください。
+        文章の中に含まれるYouTubeチャンネルのURLを自動で見つけ出します（URL以外の文章が混ざっていても問題ありません）。<br>
+        対応するURLの形式：<code>youtube.com/channel/UCxxxx...</code> と <code>youtube.com/@ハンドル名</code>
+      </p>
+      <div class="form-grid">
+        <div class="field">
+          <label>対応ゲーム（チェックした全チャンネルに適用されます）</label>
+          <select id="bulkImportGameSelect">${GAMES.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="field full" style="margin-bottom:14px;">
+        <label>まとめテキストを貼り付け</label>
+        <textarea id="bulkImportText" rows="10" placeholder="ここにまとめサイトのテキストなどをそのまま貼り付けてください"></textarea>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="submit-btn" id="bulkImportExtractBtn">URLを抽出する</button>
+      </div>
+    </div>
+
+    <div class="panel" id="bulkImportResultsPanel" style="${bulkImportResults.length ? '' : 'display:none;'}">
+      <h2>見つかったチャンネル（登録したいものにチェック）</h2>
+      <p class="hint">「（登録済み）」と表示されているものは、すでにチャンネル登録（手動）に登録済みのため、チェックを外した状態にしてあります。</p>
+      <div id="bulkImportResultsList" class="discover-list"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="submit-btn" id="bulkImportSaveBtn">選んだチャンネルを登録する</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('tabContent').innerHTML = html;
+  renderBulkImportResultsList();
+
+  document.getElementById('bulkImportExtractBtn').addEventListener('click', handleBulkImportExtract);
+  document.getElementById('bulkImportSaveBtn')?.addEventListener('click', handleBulkImportSave);
+}
+
+function renderBulkImportResultsList(){
+  const wrap = document.getElementById('bulkImportResultsList');
+  if (!wrap) return;
+  wrap.innerHTML = bulkImportResults.map((c, idx) => `
+    <label class="discover-item" style="${c.channelId ? '' : 'opacity:0.5;'}">
+      <input type="checkbox" data-bulk-idx="${idx}" ${c.checked ? 'checked' : ''} ${c.channelId ? '' : 'disabled'}>
+      <img class="discover-thumb" src="${c.thumbnail || ''}" alt="" onerror="this.style.visibility='hidden'">
+      <span class="discover-info">
+        <span class="discover-name">${c.title}${c.alreadyExists ? '（登録済み）' : ''}</span>
+        <span class="discover-id">${c.channelId || '取得できませんでした'}</span>
+      </span>
+    </label>
+  `).join('');
+  wrap.querySelectorAll('[data-bulk-idx]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      bulkImportResults[Number(cb.dataset.bulkIdx)].checked = cb.checked;
+    });
+  });
+}
+
+async function handleBulkImportExtract(){
+  const text = document.getElementById('bulkImportText').value;
+  const refs = extractYouTubeChannelRefs(text);
+  if (refs.length === 0) { showToast('チャンネルのURLが見つかりませんでした'); return; }
+
+  const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
+  if (!apiKey || apiKey.indexOf('ここに') === 0) {
+    showToast('YouTube APIキーが設定されていません（config.jsをご確認ください）');
+    return;
+  }
+
+  const btn = document.getElementById('bulkImportExtractBtn');
+  btn.disabled = true;
+  btn.textContent = '抽出中…';
+
+  try {
+    const resolved = await resolveBulkImportRefs(refs, apiKey);
+    const existingIds = new Set(loadItems('manualChannels').map(c => c.channelId));
+
+    const seen = new Set();
+    bulkImportResults = resolved.filter(r => {
+      if (!r.channelId) return true; // 取得失敗したものも一覧には残し、内容を確認できるようにする
+      if (seen.has(r.channelId)) return false;
+      seen.add(r.channelId);
+      return true;
+    }).map(r => {
+      const alreadyExists = !!r.channelId && existingIds.has(r.channelId);
+      return { ...r, alreadyExists, checked: !!r.channelId && !alreadyExists };
+    });
+
+    document.getElementById('bulkImportResultsPanel').style.display = bulkImportResults.length ? '' : 'none';
+    renderBulkImportResultsList();
+
+    const foundCount = bulkImportResults.filter(r => r.channelId).length;
+    showToast(`${refs.length}件のURLから、${foundCount}件のチャンネルを確認できました`);
+  } catch (e) {
+    console.error('[AstralHub] URL一括登録の抽出に失敗しました', e);
+    showToast('抽出中にエラーが発生しました。APIキーや利用上限をご確認ください');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'URLを抽出する';
+  }
+}
+
+function handleBulkImportSave(){
+  const gameId = document.getElementById('bulkImportGameSelect').value;
+  const selected = bulkImportResults.filter(c => c.checked && c.channelId);
+  if (selected.length === 0) { showToast('登録するチャンネルを1つ以上選んでください'); return; }
+
+  const current = loadItems('manualChannels');
+  const existingIds = new Set(current.map(c => c.channelId));
+  let addedCount = 0;
+
+  selected.forEach(c => {
+    if (existingIds.has(c.channelId)) return; // 念のための重複チェック（既存データは消さず、追加のみ行う）
+    current.unshift({ id: makeId(), publishedAt: new Date().toISOString(), game: gameId, channelId: c.channelId, label: c.title });
+    existingIds.add(c.channelId);
+    addedCount++;
+  });
+
+  saveItems('manualChannels', current);
+  showToast(`${addedCount}件のチャンネルを登録しました`);
+
+  bulkImportResults = [];
+  document.getElementById('bulkImportText').value = '';
+  renderBulkImportTab();
 }
 // ▲ここまで追加 ============================================
 </script>
