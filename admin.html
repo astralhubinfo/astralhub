@@ -214,6 +214,70 @@ function saveItems(type, items){
 }
 function gameById(id){ return GAMES.find(g => g.id === id); }
 
+// ▼ここから追加：チャンネル登録（手動）をデータベース(D1)とやり取りするための関数 ============================================
+// 「チャンネル登録（手動）」と「URL一括登録」は、以前はブラウザの中(LocalStorage)に保存していましたが、
+// ここからはCloudflare Workers経由でD1データベースに保存・取得するようにします。
+
+// データベースから、登録済みチャンネルの一覧を取得する
+async function apiGetChannels(){
+  const res = await fetch('/api/channels');
+  if (!res.ok) throw new Error('データベースからの取得に失敗しました');
+  const rows = await res.json();
+  // データベースの列名(channel_id, channel_name, created_at)を、画面表示用の名前に変換する
+  return rows.map(r => ({
+    id: r.channel_id,
+    publishedAt: r.created_at,
+    game: r.game,
+    channelId: r.channel_id,
+    label: r.channel_name,
+  }));
+}
+
+// データベースにチャンネルを1件登録する
+async function apiSaveChannel(item){
+  const res = await fetch('/api/channels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      channel_id: item.channelId,
+      channel_name: item.label || '',
+      url: '',
+      game: item.game,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '登録に失敗しました（同じチャンネルIDがすでに登録されている可能性があります）');
+  }
+  return res.json();
+}
+
+// データベースにチャンネルをまとめて登録する
+async function apiSaveChannelsBulk(items){
+  const res = await fetch('/api/channels/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      channels: items.map(i => ({
+        channel_id: i.channelId,
+        channel_name: i.label || '',
+        url: '',
+        game: i.game,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error('一括登録に失敗しました');
+  return res.json();
+}
+
+// データベースからチャンネルを1件削除する
+async function apiDeleteChannel(channelId){
+  const res = await fetch('/api/channels/' + encodeURIComponent(channelId), { method: 'DELETE' });
+  if (!res.ok) throw new Error('削除に失敗しました');
+  return res.json();
+}
+// ▲ここまで追加 ============================================
+
 function showToast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -256,11 +320,26 @@ function fieldHtml(f){
   </div>`;
 }
 
-function renderTabContent(){
+async function renderTabContent(){
   if (activeType === 'discover') { renderDiscoverTab(); return; }
   if (activeType === 'bulkImport') { renderBulkImportTab(); return; }
   const type = TYPES[activeType];
-  const items = loadItems(activeType);
+
+  let items;
+  if (activeType === 'manualChannels') {
+    // データベースからの取得には少し時間がかかるため、その間は「読み込み中」を表示する
+    document.getElementById('tabContent').innerHTML = '<div class="panel"><p class="hint">読み込み中…</p></div>';
+    try {
+      items = await apiGetChannels();
+    } catch (e) {
+      showToast(e.message || 'データベースからの取得に失敗しました');
+      items = [];
+    }
+    // 読み込み中の間にタブが切り替えられていたら、古い結果は表示しない
+    if (activeType !== 'manualChannels') return;
+  } else {
+    items = loadItems(activeType);
+  }
   const isEditing = editingIndex !== null && items[editingIndex];
   const editingItem = isEditing ? items[editingIndex] : null;
 
@@ -324,7 +403,7 @@ function renderTabContent(){
     });
   }
 
-  document.getElementById('submitBtn').addEventListener('click', () => {
+  document.getElementById('submitBtn').addEventListener('click', async () => {
     const requiredKey = type.requiredKey || 'title';
     const formValues = {};
     let hasRequired = false;
@@ -338,6 +417,32 @@ function renderTabContent(){
     if (!hasRequired) {
       const label = (type.fields.find(f => f.key === requiredKey) || {}).label || requiredKey;
       showToast(`${label}を入力してください`);
+      return;
+    }
+
+    if (activeType === 'manualChannels') {
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.disabled = true;
+      try {
+        if (isEditing) {
+          // チャンネルIDを変更していた場合は、古いIDのデータを消してから新しく登録する
+          const oldChannelId = editingItem.channelId;
+          if (oldChannelId && oldChannelId !== formValues.channelId) {
+            await apiDeleteChannel(oldChannelId);
+          }
+          await apiSaveChannel(formValues);
+          showToast('保存しました');
+          editingIndex = null;
+        } else {
+          await apiSaveChannel(formValues);
+          showToast('登録しました');
+        }
+      } catch (e) {
+        showToast(e.message || '保存に失敗しました');
+      } finally {
+        submitBtn.disabled = false;
+      }
+      renderTabContent();
       return;
     }
 
@@ -370,9 +475,23 @@ function renderTabContent(){
   });
 
   document.querySelectorAll('.del-btn[data-idx]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = Number(btn.dataset.idx);
       if (editingIndex === idx) editingIndex = null;
+
+      if (activeType === 'manualChannels') {
+        const target = items[idx];
+        if (!target) return;
+        try {
+          await apiDeleteChannel(target.channelId);
+          showToast('削除しました');
+        } catch (e) {
+          showToast(e.message || '削除に失敗しました');
+        }
+        renderTabContent();
+        return;
+      }
+
       const current = loadItems(activeType);
       current.splice(idx, 1);
       saveItems(activeType, current);
@@ -765,7 +884,13 @@ async function handleBulkImportExtract(){
 
   try {
     const resolved = await resolveBulkImportRefs(refs, apiKey);
-    const existingIds = new Set(loadItems('manualChannels').map(c => c.channelId));
+    let existingChannels = [];
+    try {
+      existingChannels = await apiGetChannels();
+    } catch (e) {
+      // 取得に失敗しても処理は続け、重複チェックだけスキップする
+    }
+    const existingIds = new Set(existingChannels.map(c => c.channelId));
 
     const seen = new Set();
     bulkImportResults = resolved.filter(r => {
@@ -792,24 +917,25 @@ async function handleBulkImportExtract(){
   }
 }
 
-function handleBulkImportSave(){
+async function handleBulkImportSave(){
   const gameId = document.getElementById('bulkImportGameSelect').value;
   const selected = bulkImportResults.filter(c => c.checked && c.channelId);
   if (selected.length === 0) { showToast('登録するチャンネルを1つ以上選んでください'); return; }
 
-  const current = loadItems('manualChannels');
-  const existingIds = new Set(current.map(c => c.channelId));
-  let addedCount = 0;
+  const saveBtn = document.getElementById('bulkImportSaveBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '登録中…'; }
 
-  selected.forEach(c => {
-    if (existingIds.has(c.channelId)) return; // 念のための重複チェック（既存データは消さず、追加のみ行う）
-    current.unshift({ id: makeId(), publishedAt: new Date().toISOString(), game: gameId, channelId: c.channelId, label: c.title });
-    existingIds.add(c.channelId);
-    addedCount++;
-  });
-
-  saveItems('manualChannels', current);
-  showToast(`${addedCount}件のチャンネルを登録しました`);
+  try {
+    const items = selected.map(c => ({ game: gameId, channelId: c.channelId, label: c.title }));
+    const result = await apiSaveChannelsBulk(items);
+    const addedCount = (result.inserted || []).length;
+    const skippedCount = (result.skipped || []).length;
+    showToast(`${addedCount}件のチャンネルを登録しました${skippedCount ? `（${skippedCount}件は登録済みのためスキップしました）` : ''}`);
+  } catch (e) {
+    showToast(e.message || '一括登録に失敗しました');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '選んだチャンネルを登録する'; }
+  }
 
   bulkImportResults = [];
   document.getElementById('bulkImportText').value = '';
