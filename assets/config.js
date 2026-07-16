@@ -13,9 +13,6 @@ window.ASTRA_CONFIG = {
   // ここに貼り替えるための新しいコードをすぐに用意できます。
   ADMIN_PASSWORD_HASH: '6aa84bac01d7daf2f21bbeb80bd83ee8fc026817130af361e8d693186a594135',
 
-  // ▼YouTube自動取得（チャンネル指定方式）の設定
-  YOUTUBE_API_KEY: 'AIzaSyAN1XbEGMo432SB8Df_6r7UCRbhOgJhPLA',
-
   // 監視したいチャンネルの一覧です。
   // 「検索」ではなく「このチャンネルだけを見に行く」方式にしたので、API消費が大幅に減ります。
   //
