@@ -386,10 +386,10 @@ async function refreshLiveChannels(env) {
   }
 }
 
-// ③直近2週間に投稿された動画の再生回数を、まとめて更新する(人気動画ランキング用)
+// ③直近30日間に投稿された動画の再生回数を、まとめて更新する(人気動画ランキング用)
 async function refreshRecentVideoStats(env) {
   const { results } = await env.DB.prepare(
-    "SELECT video_id FROM videos WHERE published_at >= datetime('now', '-14 days')"
+    "SELECT video_id FROM videos WHERE published_at >= datetime('now', '-30 days')"
   ).all();
   if (results.length === 0) return;
 
