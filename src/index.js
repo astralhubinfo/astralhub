@@ -3,7 +3,6 @@ export default {
     const url = new URL(request.url);
 
     // ===== 0. YouTubeからの通知(WebSub)は、パスワード認証を通さない =====
-    // (Googleのサーバーからのアクセスなので、IDやパスワードは入力できません)
     if (url.pathname === "/websub/callback") {
       if (request.method === "GET") {
         return handleWebSubVerify(request, env);
@@ -39,7 +38,7 @@ export default {
       });
     }
 
-    // ===== 2. チャンネル登録の受付窓口(API)(前回作成分・変更なし) =====
+    // ===== 2. チャンネル登録の受付窓口(API) =====
 
     // 窓口1:チャンネル一覧を取得する(GET /api/channels)
     if (url.pathname === "/api/channels" && request.method === "GET") {
@@ -58,6 +57,8 @@ export default {
       try {
         const body = await request.json();
         const result = await insertChannel(env.DB, body);
+        // 登録成功後、YouTubeへ通知をお願いする(結果は待たずに実行、失敗しても登録自体は成功扱い)
+        await requestWebSubSubscribe(body.channel_id, env).catch(() => {});
         return jsonResponse(result);
       } catch (err) {
         return jsonResponse({ error: err.message }, 400);
@@ -76,6 +77,7 @@ export default {
           try {
             await insertChannel(env.DB, ch);
             inserted.push(ch.channel_id);
+            await requestWebSubSubscribe(ch.channel_id, env).catch(() => {});
           } catch (err) {
             skipped.push({ channel_id: ch.channel_id, reason: err.message });
           }
@@ -94,7 +96,24 @@ export default {
         await env.DB.prepare("DELETE FROM channels WHERE channel_id = ?")
           .bind(channelId)
           .run();
+        await requestWebSubUnsubscribe(channelId, env).catch(() => {});
         return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口5(今回限定・お掃除用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
+    // これを使い終わったら、この窓口はステップDで削除します。
+    if (url.pathname === "/api/channels/resubscribe-all" && request.method === "POST") {
+      try {
+        const { results } = await env.DB.prepare("SELECT channel_id FROM channels").all();
+        const done = [];
+        for (const row of results) {
+          await requestWebSubSubscribe(row.channel_id, env).catch(() => {});
+          done.push(row.channel_id);
+        }
+        return jsonResponse({ requested: done });
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
@@ -128,8 +147,37 @@ function jsonResponse(data, status = 200) {
 }
 
 // ============================================================
-// ▼ここから追加:WebSub(YouTubeからの自動通知)関連の処理 ============================================
+// ▼WebSub(YouTubeからの自動通知)関連の処理 ============================================
 // ============================================================
+
+// YouTubeへ「このチャンネルの新着を通知してください」とお願いする(申し込み)
+async function requestWebSubSubscribe(channelId, env) {
+  return sendWebSubRequest(channelId, env, "subscribe");
+}
+
+// YouTubeへ「通知はもう不要です」と伝える(解除、チャンネル削除時に使用)
+async function requestWebSubUnsubscribe(channelId, env) {
+  return sendWebSubRequest(channelId, env, "unsubscribe");
+}
+
+async function sendWebSubRequest(channelId, env, mode) {
+  if (!channelId) return;
+  const callbackUrl = `${env.SITE_URL}/websub/callback`;
+  const topicUrl = `https://www.youtube.com/xml/feeds/videos.xml?channel_id=${channelId}`;
+
+  const formBody = new URLSearchParams({
+    "hub.mode": mode,
+    "hub.topic": topicUrl,
+    "hub.callback": callbackUrl,
+    "hub.verify": "async",
+  });
+
+  await fetch("https://pubsubhubbub.appspot.com/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formBody.toString(),
+  });
+}
 
 // YouTube(Googleのhubサーバー)からの「通知していいですか?」という確認に応答する
 async function handleWebSubVerify(request, env) {
@@ -148,7 +196,6 @@ async function handleWebSubVerify(request, env) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // 登録されていないチャンネルからの申し込みは拒否する(なりすまし防止)
   const channelRow = await env.DB.prepare(
     "SELECT channel_id FROM channels WHERE channel_id = ?"
   )
@@ -159,7 +206,7 @@ async function handleWebSubVerify(request, env) {
   }
 
   if (mode === "subscribe") {
-    const seconds = Number(leaseSeconds) || 432000; // 指定が無ければ5日として扱う
+    const seconds = Number(leaseSeconds) || 432000;
     const expiresAt = new Date(Date.now() + seconds * 1000).toISOString();
     await env.DB.prepare(
       `INSERT INTO websub_subscriptions (channel_id, subscribed_at, expires_at)
@@ -174,7 +221,6 @@ async function handleWebSubVerify(request, env) {
       .run();
   }
 
-  // hub.challengeをそのまま返すことで、申し込みが確定する(WebSubの決まりごと)
   return new Response(challenge, {
     status: 200,
     headers: { "Content-Type": "text/plain" },
@@ -190,7 +236,6 @@ async function handleWebSubNotification(request, env) {
     const { videoId, channelId } = entry;
     if (!videoId || !channelId) continue;
 
-    // 登録されていないチャンネルからの通知は無視する(なりすまし防止)
     const channelRow = await env.DB.prepare(
       "SELECT game FROM channels WHERE channel_id = ?"
     )
@@ -204,7 +249,6 @@ async function handleWebSubNotification(request, env) {
   return new Response("OK", { status: 200 });
 }
 
-// 通知のXMLから、動画IDとチャンネルIDの組み合わせを取り出す(簡易的な読み取り処理)
 function extractAtomEntries(xml) {
   const entries = [];
   const entryBlocks = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
@@ -216,13 +260,11 @@ function extractAtomEntries(xml) {
   return entries;
 }
 
-// 申し込みURL(topic)から、チャンネルIDだけを取り出す
 function extractChannelIdFromTopic(topic) {
   const match = topic.match(/channel_id=([a-zA-Z0-9_-]+)/);
   return match ? match[1] : null;
 }
 
-// 動画IDをもとに、YouTube側の詳しい情報を取得してデータベースに保存する
 async function fetchAndStoreVideo(videoId, channelId, game, env) {
   const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,statistics&id=${videoId}&key=${env.YOUTUBE_API_KEY}`;
   const res = await fetch(apiUrl);
@@ -240,7 +282,6 @@ async function fetchAndStoreVideo(videoId, channelId, game, env) {
   const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
 
   if (snippet.liveBroadcastContent === "live") {
-    // 現在LIVE配信中の場合 → live_status テーブルを更新
     await env.DB.prepare(
       `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, updated_at)
        VALUES (?, 1, ?, ?, ?, ?, datetime('now'))
@@ -253,7 +294,6 @@ async function fetchAndStoreVideo(videoId, channelId, game, env) {
     return;
   }
 
-  // 通常動画・アーカイブの場合 → videos テーブルに保存(新規 or 情報更新)
   await env.DB.prepare(
     `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, updated_at)
      VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'))
@@ -274,7 +314,6 @@ async function fetchAndStoreVideo(videoId, channelId, game, env) {
     .run();
 }
 
-// "PT1H2M3S" のようなYouTube独特の時間表記を、秒数(数字)に変換する
 function parseIsoDuration(iso) {
   const match = iso.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
   if (!match) return 0;
