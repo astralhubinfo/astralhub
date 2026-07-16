@@ -13,5 +13,11 @@
       "database_name": "astralhub-db",
       "database_id": "e5cbaf7a-8e92-4f0c-89d5-9bb4332bea98"
     }
-  ]
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *",
+      "*/30 * * * *"
+    ]
+  }
 }
