@@ -57,7 +57,6 @@ export default {
       try {
         const body = await request.json();
         const result = await insertChannel(env.DB, body);
-        // 登録成功後、YouTubeへ通知をお願いする(結果は待たずに実行、失敗しても登録自体は成功扱い)
         await requestWebSubSubscribe(body.channel_id, env).catch(() => {});
         return jsonResponse(result);
       } catch (err) {
@@ -103,8 +102,7 @@ export default {
       }
     }
 
-    // 窓口5(今回限定・お掃除用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
-    // これを使い終わったら、この窓口はステップDで削除します。
+    // 窓口5(お掃除用・手動実行専用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
     if (url.pathname === "/api/channels/resubscribe-all" && request.method === "POST") {
       try {
         const { results } = await env.DB.prepare("SELECT channel_id FROM channels").all();
@@ -121,6 +119,20 @@ export default {
 
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
+  },
+
+  // ============================================================
+  // ▼ここから追加:定期実行(Cron)の処理 ============================================
+  // ============================================================
+  async scheduled(controller, env, ctx) {
+    if (controller.cron === "*/5 * * * *") {
+      // 5分ごと:①通知期限が近いチャンネルの更新 ②LIVE中チャンネルの再確認
+      ctx.waitUntil(renewExpiringSubscriptions(env));
+      ctx.waitUntil(refreshLiveChannels(env));
+    } else if (controller.cron === "*/30 * * * *") {
+      // 30分ごと:人気動画の再生回数まとめ更新
+      ctx.waitUntil(refreshRecentVideoStats(env));
+    }
   },
 };
 
@@ -150,12 +162,10 @@ function jsonResponse(data, status = 200) {
 // ▼WebSub(YouTubeからの自動通知)関連の処理 ============================================
 // ============================================================
 
-// YouTubeへ「このチャンネルの新着を通知してください」とお願いする(申し込み)
 async function requestWebSubSubscribe(channelId, env) {
   return sendWebSubRequest(channelId, env, "subscribe");
 }
 
-// YouTubeへ「通知はもう不要です」と伝える(解除、チャンネル削除時に使用)
 async function requestWebSubUnsubscribe(channelId, env) {
   return sendWebSubRequest(channelId, env, "unsubscribe");
 }
@@ -179,7 +189,6 @@ async function sendWebSubRequest(channelId, env, mode) {
   });
 }
 
-// YouTube(Googleのhubサーバー)からの「通知していいですか?」という確認に応答する
 async function handleWebSubVerify(request, env) {
   const url = new URL(request.url);
   const mode = url.searchParams.get("hub.mode");
@@ -227,7 +236,6 @@ async function handleWebSubVerify(request, env) {
   });
 }
 
-// YouTubeからの「新しい動画・配信が出ました」という通知を受け取る
 async function handleWebSubNotification(request, env) {
   const body = await request.text();
   const entries = extractAtomEntries(body);
@@ -321,4 +329,97 @@ function parseIsoDuration(iso) {
   const minutes = Number(match[2] || 0);
   const seconds = Number(match[3] || 0);
   return hours * 3600 + minutes * 60 + seconds;
+}
+
+// ============================================================
+// ▼ここから追加:定期実行(Cron)で使う処理 ============================================
+// ============================================================
+
+// ①通知の申し込み期限が近い(24時間以内)チャンネルを、自動で更新する
+async function renewExpiringSubscriptions(env) {
+  const soon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const { results } = await env.DB.prepare(
+    "SELECT channel_id FROM websub_subscriptions WHERE expires_at < ?"
+  )
+    .bind(soon)
+    .all();
+
+  for (const row of results) {
+    await requestWebSubSubscribe(row.channel_id, env).catch(() => {});
+  }
+}
+
+// ②現在LIVE中とされているチャンネルだけ、最新の状況を確認する
+async function refreshLiveChannels(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT channel_id, live_video_id FROM live_status WHERE is_live = 1"
+  ).all();
+  if (results.length === 0) return;
+
+  const videoIds = results.map(r => r.live_video_id).filter(Boolean);
+  const videoMap = await fetchVideosBatched(videoIds, env);
+
+  for (const row of results) {
+    const video = videoMap[row.live_video_id];
+    if (!video) {
+      // 情報が取得できない(配信削除など) → LIVE状態を終了扱いにする
+      await env.DB.prepare("UPDATE live_status SET is_live = 0 WHERE channel_id = ?")
+        .bind(row.channel_id)
+        .run();
+      continue;
+    }
+    const snippet = video.snippet || {};
+    if (snippet.liveBroadcastContent === "live") {
+      // まだLIVE中 → 視聴者数だけ更新
+      const viewerCount = Number((video.liveStreamingDetails || {}).concurrentViewers) || 0;
+      await env.DB.prepare(
+        "UPDATE live_status SET viewer_count = ?, updated_at = datetime('now') WHERE channel_id = ?"
+      )
+        .bind(viewerCount, row.channel_id)
+        .run();
+    } else {
+      // LIVEが終了した → is_liveを0にする(動画・アーカイブとしての保存はwebsub通知側で行われます)
+      await env.DB.prepare("UPDATE live_status SET is_live = 0 WHERE channel_id = ?")
+        .bind(row.channel_id)
+        .run();
+    }
+  }
+}
+
+// ③直近2週間に投稿された動画の再生回数を、まとめて更新する(人気動画ランキング用)
+async function refreshRecentVideoStats(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT video_id FROM videos WHERE published_at >= datetime('now', '-14 days')"
+  ).all();
+  if (results.length === 0) return;
+
+  const videoIds = results.map(r => r.video_id);
+  const videoMap = await fetchVideosBatched(videoIds, env);
+
+  for (const videoId of videoIds) {
+    const video = videoMap[videoId];
+    if (!video) continue;
+    const statistics = video.statistics || {};
+    await env.DB.prepare(
+      "UPDATE videos SET view_count = ?, updated_at = datetime('now') WHERE video_id = ?"
+    )
+      .bind(Number(statistics.viewCount) || 0, videoId)
+      .run();
+  }
+}
+
+// 動画IDの配列を、50件ずつまとめてYouTubeに問い合わせる共通処理(API節約のため)
+async function fetchVideosBatched(videoIds, env) {
+  const videoMap = {};
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const chunk = videoIds.slice(i, i + 50);
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails,statistics&id=${chunk.join(",")}&key=${env.YOUTUBE_API_KEY}`;
+    const res = await fetch(apiUrl);
+    if (!res.ok) continue;
+    const data = await res.json();
+    for (const video of data.items || []) {
+      videoMap[video.id] = video;
+    }
+  }
+  return videoMap;
 }
