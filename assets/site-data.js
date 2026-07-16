@@ -57,20 +57,6 @@
     } catch (e) { return []; }
   }
 
-  // 管理画面の「チャンネル登録（手動）」タブで登録されたチャンネルを読み込む。
-  // 保存されている形は { game, channelId, label, ... } なので、config.js の YOUTUBE_CHANNELS と
-  // 同じ形（channelId, gameId, label）に変換して返す。
-  function loadManualChannels(){
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.manualChannels);
-      const arr = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(arr)) return [];
-      return arr
-        .filter(c => c && c.channelId)
-        .map(c => ({ channelId: c.channelId, gameId: c.game, label: c.label || c.channelId }));
-    } catch (e) { return []; }
-  }
-
   function gameById(id){ return window.ASTRA_CONFIG.GAMES.find(g => g.id === id); }
 
   // ゲームの「略称」の一覧。ここに登録したゲームは必ずこの表記で表示される。
@@ -168,8 +154,10 @@
   // 手動で登録した古いデータ（channelIdを持たない）は、念のためチャンネル名でも一致を見る。
   function getFilteredData(activeGameIds){
     const news = loadList(STORAGE_KEYS.news, SAMPLE_NEWS);
-    const live = loadList(STORAGE_KEYS.live, SAMPLE_LIVE);
-    const videos = loadList(STORAGE_KEYS.videos, SAMPLE_VIDEOS);
+    // LIVE・動画は、データベース(D1)から取得済みのデータ(cachedLive/cachedVideos)を使う。
+    // まだ一度も取得できていない場合(ページを開いた直後など)は、これまで通りサンプルを表示する。
+    const live = cachedLive !== null ? cachedLive : sampleToTimestamped(SAMPLE_LIVE);
+    const videos = cachedVideos !== null ? cachedVideos : sampleToTimestamped(SAMPLE_VIDEOS);
     const ledger = loadChannelLedger();
     const blockedIds = new Set(ledger.filter(c => c.blocked === 'block' && c.channelId).map(c => c.channelId));
     const blockedNames = new Set(ledger.filter(c => c.blocked === 'block' && !c.channelId).map(c => c.channel));
@@ -194,17 +182,11 @@
     return news.find(n => n.id === id) || null;
   }
 
-  // ▼ここから追加：YouTube自動取得機能（チャンネル指定方式） ============================================
-  // 役割：config.js の YOUTUBE_CHANNELS に登録されたチャンネルひとつひとつについて、
-  //       ①「今まさにLIVE配信中か」を search API でピンポイントに確認する
-  //       ②「アップロード一覧（Playlists API）」から通常動画（ショート・アーカイブを除く）を取得する
-  //       という2つの処理を行い、STORAGE_KEYS.live / STORAGE_KEYS.videos に保存する。
-  //
-  //       【重要・修正メモ】YouTubeの仕様上、配信中のLIVE動画は「配信が終わってアーカイブになるまで」
-  //       アップロード一覧（Playlists API）には出てきません。そのため、LIVE検知だけは
-  //       search API（type=video&eventType=live）で別途確認する必要があります。
-  //       search APIは他のAPIより消費（クォータ）が大きいため、通常動画の取得には使わず
-  //       「LIVE検知」の用途だけに限定して使っています。
+  // ▼ここから追加：YouTube自動取得機能（サーバー経由・データベース方式） ============================================
+  // 役割：LIVE配信・新着動画・人気動画の情報は、Cloudflare Workers側(YouTubeからの自動通知＋定期実行)
+  //       によって、すでにデータベース(D1)に貯められている。
+  //       ここでは、そのデータベースの中身を「/api/live」「/api/videos」から読みに行くだけを行う。
+  //       （以前のように、ブラウザから直接YouTube APIへ問い合わせる処理は行わない）
 
   // ▼公式チャンネル（特別枠）の一覧 ============================================
   // ここに登録したチャンネルは、配信タイトルにゲーム名が入っていなくても、
@@ -229,337 +211,100 @@
 
   const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
 
-  async function ytFetchJson(url){
-    const res = await fetch(url);
+  // データベース(D1)から取得した最新のLIVE・動画データを、一時的に覚えておくための入れ物。
+  // ページを開いた直後(まだ一度も取得していない)は null のままで、その間はサンプルを表示する。
+  let cachedLive = null;
+  let cachedVideos = null;
+
+  // サーバー(Cloudflare Workers)のAPIから、JSON形式のデータを取得する共通処理
+  async function apiFetchJson(path){
+    const res = await fetch(path);
     if (!res.ok) {
       const body = await res.text();
-      throw new Error('YouTube APIエラー: ' + res.status + ' ' + body);
+      throw new Error('データベースからの取得に失敗しました: ' + res.status + ' ' + body);
     }
     return res.json();
   }
 
-  // 配列を指定した個数ずつのグループに分割する（YouTube APIは一度に最大50件までしか指定できないため）
-  function chunkArray(arr, size){
-    const out = [];
-    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-    return out;
-  }
-
-  // ISO8601形式の動画時間（例: "PT4M13S"）を秒数に変換する
-  function ytDurationToSeconds(iso){
-    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
-    return (parseInt(m[1]||'0',10) * 3600) + (parseInt(m[2]||'0',10) * 60) + parseInt(m[3]||'0',10);
-  }
-
-  // ISO8601形式の動画時間を "4:13" のような表示用の文字列に変換する
-  function ytFormatDuration(iso){
-    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) || [];
-    const h = parseInt(m[1] || '0', 10);
-    const min = parseInt(m[2] || '0', 10);
-    const s = parseInt(m[3] || '0', 10);
-    const mm = h > 0 ? String(min).padStart(2, '0') : String(min);
+  // 秒数を "4:13" のような表示用の文字列に変換する
+  function secondsToDurationLabel(totalSeconds){
+    const sec = Number(totalSeconds) || 0;
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
     const ss = String(s).padStart(2, '0');
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
-  // 登録された各チャンネルの「アップロード一覧プレイリストID」をまとめて取得する（channels.list、最大50件ずつ）
-  // これを使うことで、チャンネルごとに個別リクエストを送るより消費を抑えられる
-  async function ytFetchUploadsPlaylistIds(channelIds, apiKey){
-    const map = new Map(); // channelId -> uploadsPlaylistId
-    for (const chunk of chunkArray(channelIds, 50)) {
-      const url = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${chunk.join(',')}&key=${apiKey}`;
-      const data = await ytFetchJson(url);
-      (data.items || []).forEach(ch => {
-        const uploads = ch.contentDetails && ch.contentDetails.relatedPlaylists && ch.contentDetails.relatedPlaylists.uploads;
-        if (uploads) map.set(ch.id, uploads);
-      });
-    }
-    return map;
-  }
-
-  // 指定したプレイリスト（＝あるチャンネルのアップロード一覧）から、最新の動画を取得する
-  async function ytFetchPlaylistItems(playlistId, apiKey, maxResults){
-    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${maxResults || 5}&key=${apiKey}`;
-    const data = await ytFetchJson(url);
-    return data.items || [];
-  }
-
-  // ★新規追加：指定したチャンネルが「今まさにLIVE配信中」かどうかをピンポイントで確認する
-  // アップロード一覧には出てこない「配信中」の動画を見つけるための唯一の確実な方法（search API）
-  // 通常は0件（配信していない）か1件（配信中）が返る
-  async function ytFetchLiveVideoIds(channelId, apiKey){
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`;
-    const data = await ytFetchJson(url);
-    return (data.items || []).map(item => item.id && item.id.videoId).filter(Boolean);
-  }
-
-  // 動画IDの一覧から、再生回数・動画の長さ・同時視聴者数・LIVE状態などの詳細情報をまとめて取得する（最大50件ずつ）
-  async function ytFetchVideoDetails(videoIds, apiKey){
-    if (videoIds.length === 0) return [];
-    const all = [];
-    for (const chunk of chunkArray(videoIds, 50)) {
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,liveStreamingDetails&id=${chunk.join(',')}&key=${apiKey}`;
-      const data = await ytFetchJson(url);
-      all.push(...(data.items || []));
-    }
-    return all;
-  }
-
-  // YouTubeショートの判定：以下のどちらかに当てはまる動画をショートとみなして除外する。
-  //   ①動画の長さが config.js の SHORTS_FILTER.MAX_DURATION_SECONDS（既定1分）以下
-  //   ②タイトルに config.js の SHORTS_FILTER.TITLE_KEYWORDS（例：'#shorts'）のいずれかが含まれる
-  //     → 投稿者自身が「これはショートです」と示している目印なので、長さに関係なく確実に除外する
-  //
-  // 【修正メモ】以前はサムネイル画像の縦横比（縦長かどうか）でも判定していましたが、
-  // YouTube側から返ってくるサムネイル情報は、実際はショート動画（縦型）であっても
-  // ほとんどの場合「横長」のデータとして返ってくるという癖があり、この判定が正しく機能していませんでした。
-  // そのため、「動画の長さ」と「タイトルの目印」の2つで判定するように変更しています。
-  function ytIsShort(detail){
-    const shortsConf = window.ASTRA_CONFIG.SHORTS_FILTER || {};
-    const title = (detail && detail.snippet && detail.snippet.title || '').toLowerCase();
-    const titleKeywords = shortsConf.TITLE_KEYWORDS || [];
-    const hasShortsKeyword = titleKeywords.some(kw => title.includes(String(kw).toLowerCase()));
-    if (hasShortsKeyword) return true;
-
-    const iso = detail && detail.contentDetails && detail.contentDetails.duration;
-    if (!iso) return false;
-    const totalSeconds = ytDurationToSeconds(iso);
-    const maxShortSeconds = typeof shortsConf.MAX_DURATION_SECONDS === 'number' ? shortsConf.MAX_DURATION_SECONDS : 60;
-    if (totalSeconds <= 0) return false;
-    return totalSeconds <= maxShortSeconds;
-  }
-
-  // 「配信中」かどうかは、動画詳細のliveBroadcastContentで確認する
-  // （プレミア公開など、紛らわしいものを「配信中」と誤判定しないようにするため）
-  function ytIsCurrentlyLive(detail){
-    return !!(detail && detail.snippet && detail.snippet.liveBroadcastContent === 'live');
-  }
-
-  // 過去に配信されたアーカイブ（配信が終わったもの）かどうかを判定する
-  // liveStreamingDetailsは「配信（今もこれからも含む）だった動画」に必ず付くため、これがあれば配信系とみなす
-  function ytIsBroadcastVideo(detail){
-    return !!(detail && detail.liveStreamingDetails);
-  }
-
-  // ▼ここから追加：ライブ配信の仕分け・絞り込み（ハイブリッド方式） ============================================
-  // 役割：2段階で「このライブ配信を、どのゲームの枠に表示するか」を決める。
-  //   【ステップ1】公式チャンネル（特別枠 = OFFICIAL_CHANNELS）に該当する場合
-  //     → タイトルは一切見ず、登録されているゲームIDの枠に強制的に表示する。
-  //   【ステップ2】該当しない場合（一般配信者）
-  //     → 配信タイトルだけを見て、config.js の GAME_KEYWORDS に登録されている
-  //       ゲーム名（キーワード）が含まれているかを判定する。
-  //       ・手動登録時と別のゲームのキーワードが見つかった場合 → そのゲームIDに書き換える（仕分け）
-  //       ・どのゲームのキーワードにも一致しない場合 → null を返す（呼び出し側で保存をスキップ・除外する）
-  //   ※誤判定を防ぐため、判定材料は「タイトルのみ」。概要欄・タグ（キーワードタグ）は使用しない。
-  //
-  // 戻り値：表示すべきgameId（文字列） / 除外すべき場合は null
-  function classifyGameIdForItem(detail, chConf){
-    // ステップ1：公式チャンネル（特別枠）→ タイトル判定なしで固定のゲーム枠に表示する
-    if (chConf.channelId && Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, chConf.channelId)) {
-      return OFFICIAL_CHANNELS[chConf.channelId];
-    }
-
-    // ステップ2：一般配信者 → タイトルのみでゲームを判定する
-    const snippet = (detail && detail.snippet) || {};
-    const text = (snippet.title || '').toLowerCase();
-
-    const gameKeywords = window.ASTRA_CONFIG.GAME_KEYWORDS || {};
-    const matchedGameIds = Object.keys(gameKeywords).filter(gameId =>
-      (gameKeywords[gameId] || []).some(kw => text.includes(String(kw).toLowerCase()))
-    );
-
-    if (matchedGameIds.length === 0) return null; // どのゲームのキーワードにも一致しない → 除外
-    if (matchedGameIds.includes(chConf.gameId)) return chConf.gameId; // 手動登録どおりのゲームで一致 → そのまま
-    return matchedGameIds[0]; // 別ゲームのキーワードを検知 → そのゲームのIDに書き換え
-  }
-  // ▲ここまで追加 ============================================
-
-  // 取得したYouTubeのデータを、AstralHubのカードがそのまま読める形に変換する
-  // source: 'youtube-auto' は「自動取得したデータ」の目印
-  // channelId: 管理画面でのブロック設定に使う
-  // url: サムネイルクリックで実際の配信・動画ページへ飛べるようにするためのリンク先
-  // LIVEカード用のデータを組み立てる（search APIで見つけた videoId と、videos APIで取得した詳細情報から作る）
-  function ytBuildLiveItem(chConf, videoId, detail){
-    const snippet = detail.snippet || {};
+  // データベースの「live_status」の行を、LIVEカードがそのまま読める形に変換する
+  function mapLiveRow(row){
     return {
-      id: videoId,
-      game: chConf.gameId,
+      id: row.live_video_id,
+      game: row.game,
       source: 'youtube-auto',
-      channelId: chConf.channelId,
-      url: 'https://www.youtube.com/watch?v=' + videoId,
-      title: snippet.title || '',
-      channel: snippet.channelTitle || chConf.label || '',
-      thumbnail: (snippet.thumbnails && (snippet.thumbnails.medium || snippet.thumbnails.default) || {}).url || '',
-      viewers: (detail.liveStreamingDetails && detail.liveStreamingDetails.concurrentViewers)
-        ? parseInt(detail.liveStreamingDetails.concurrentViewers, 10) : 0,
+      channelId: row.channel_id,
+      isOfficial: Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, row.channel_id),
+      url: row.live_video_id ? ('https://www.youtube.com/watch?v=' + row.live_video_id) : '',
+      title: row.title || '',
+      channel: row.channel_name || '',
+      thumbnail: row.thumbnail_url || '',
+      viewers: Number(row.viewer_count) || 0,
     };
   }
 
-  function ytBuildVideoItem(chConf, playlistItem, detail){
-    const videoId = playlistItem.snippet.resourceId.videoId;
+  // データベースの「videos」の行を、動画カードがそのまま読める形に変換する
+  // isOfficial: OFFICIAL_CHANNELSに登録されているチャンネルかどうかの目印。
+  // これがtrueの動画は「人気動画」「新着動画」には出さず、「公式チャンネル」枠にのみ表示する(表示側の絞り込みで使用)。
+  function mapVideoRow(row){
     return {
-      id: videoId,
-      game: chConf.gameId,
+      id: row.video_id,
+      game: row.game,
       source: 'youtube-auto',
-      channelId: chConf.channelId,
-      // ★追加：OFFICIAL_CHANNELSに登録されているチャンネルかどうかの目印。
-      // これがtrueの動画は「人気動画」「新着動画」には出さず、「公式チャンネル」枠にのみ表示する。
-      isOfficial: Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, chConf.channelId),
-      url: 'https://www.youtube.com/watch?v=' + videoId,
-      title: playlistItem.snippet.title,
-      channel: playlistItem.snippet.channelTitle,
-      thumbnail: (playlistItem.snippet.thumbnails && (playlistItem.snippet.thumbnails.medium || playlistItem.snippet.thumbnails.default) || {}).url || '',
-      views: (detail.statistics && detail.statistics.viewCount) ? parseInt(detail.statistics.viewCount, 10) : 0,
-      duration: (detail.contentDetails && detail.contentDetails.duration) ? ytFormatDuration(detail.contentDetails.duration) : '',
-      publishedAt: playlistItem.snippet.publishedAt,
+      channelId: row.channel_id,
+      isOfficial: Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, row.channel_id),
+      url: 'https://www.youtube.com/watch?v=' + row.video_id,
+      title: row.title || '',
+      channel: row.channel_name || '',
+      thumbnail: row.thumbnail_url || '',
+      views: Number(row.view_count) || 0,
+      duration: secondsToDurationLabel(row.duration_seconds),
+      publishedAt: row.published_at,
     };
   }
 
-  // config.js の YOUTUBE_CHANNELS に登録された全チャンネル分、YouTubeからデータを取得してlocalStorageに保存する
-  // 「ショート動画」と「配信済みアーカイブ」は動画欄から除外し、配信中のものだけをLIVE欄に載せる
-  // さらに、タイトルキーワードによる仕分け・絞り込み（classifyGameIdForItem）もここで適用する
-  // index.html / list.html の読み込み時に1回呼び出す想定
+  // データベース(D1)から、LIVE・動画の最新情報をまとめて取得する。
+  // 取得したデータはcachedLive/cachedVideosに保存され、次にgetFilteredDataが呼ばれたときに使われる。
+  // index.html / list.html の読み込み時に1回呼び出す想定(以前のYouTube直接取得版と同じ使い方です)。
+  //
+  // 【重要】以前とちがい、YouTubeへの問い合わせはこの関数の中では行いません。
+  // YouTubeへの問い合わせ・LIVE検知・ショート動画の除外などは、すべてサーバー側
+  // (Cloudflare Workersの自動通知の受け取り・定期実行)ですでに終わらせてあります。
+  // ここでは、サーバー側が貯めておいてくれたデータベースの中身を読みに行くだけです。
   async function refreshYouTubeData(){
-    const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
-
-    // 自動取得の対象チャンネルは「config.js に直接書かれたチャンネル」と
-    // 「管理画面の『チャンネル登録（手動）』タブで登録されたチャンネル」を合わせたものにする。
-    // 同じchannelIdが両方にある場合は、config.js側の設定を優先する（手動登録側は無視する）。
-    const configChannels = window.ASTRA_CONFIG.YOUTUBE_CHANNELS || [];
-    const manualChannels = loadManualChannels();
-    const configChannelIds = new Set(configChannels.map(c => c.channelId));
-    const channelList = [...configChannels, ...manualChannels.filter(c => !configChannelIds.has(c.channelId))];
-
-    const cacheConf = window.ASTRA_CONFIG.CACHE_MINUTES || {};
-    // LIVEのリアルタイム性を優先するため、既定では live のキャッシュ分数（通常0分＝毎回確認）を基準にする
-    const throttleMinutes = typeof cacheConf.live === 'number' ? cacheConf.live : 0;
-
-    if (!apiKey || apiKey.indexOf('ここに') === 0) {
-      console.warn('[AstralHub] YouTube APIキーが未設定のため、自動取得はスキップされました。');
-      return false;
-    }
-    if (channelList.length === 0) {
-      console.warn('[AstralHub] 登録されているチャンネルが1件もないため、自動取得はスキップされました（config.js の YOUTUBE_CHANNELS、または管理画面の「チャンネル登録（手動）」タブでチャンネルを登録してください）。');
-      return false;
-    }
-
-    // 前回の取得から一定時間が経っていなければ何もしない（APIの上限を使い切らないための安全弁）
-    const lastFetch = parseInt(localStorage.getItem(YT_LAST_FETCH_KEY) || '0', 10);
-    if (Date.now() - lastFetch < throttleMinutes * 60000) {
-      console.log('[AstralHub][調査] 前回の取得から時間が経っていないため、今回はスキップされました（' + throttleMinutes + '分待つと再取得します）');
-      return false;
-    }
-
     try {
-      const channelIds = channelList.map(c => c.channelId).filter(Boolean);
-      const uploadsMap = await ytFetchUploadsPlaylistIds(channelIds, apiKey);
-
-      // ① 各チャンネルについて「今まさにLIVE配信中か」を確認する（search API・LIVE検知専用）
-      const liveCheckResults = await Promise.all(channelList.map(async (chConf) => {
-        if (!chConf.channelId) return [];
-        try {
-          const videoIds = await ytFetchLiveVideoIds(chConf.channelId, apiKey);
-          // ▼調査用ログ（原因特定のための一時的なものです。解決したら削除してOKです）
-          console.log('[AstralHub][調査] チャンネル「' + (chConf.label || chConf.channelId) + '」のLIVE検索結果:', videoIds.length + '件', videoIds);
-          return videoIds.map(videoId => ({ videoId, chConf }));
-        } catch (e) {
-          console.error('[AstralHub] LIVE確認に失敗しました（チャンネル: ' + (chConf.label || chConf.channelId) + '）', e);
-          return [];
-        }
-      }));
-      const flatLiveCandidates = liveCheckResults.flat();
-
-      // ② 各チャンネルの「アップロード一覧」から、通常動画の候補を取得する（Playlists API＝消費が少ない）
-      const perChannelVideoResults = await Promise.all(channelList.map(async (chConf) => {
-        const uploadsPlaylistId = uploadsMap.get(chConf.channelId);
-        if (!uploadsPlaylistId) {
-          console.warn('[AstralHub] チャンネルが見つかりませんでした（channelIdをご確認ください）: ' + (chConf.label || chConf.channelId));
-          return [];
-        }
-        try {
-          const items = await ytFetchPlaylistItems(uploadsPlaylistId, apiKey, 5);
-          return items.map(playlistItem => ({ playlistItem, chConf }));
-        } catch (e) {
-          console.error('[AstralHub] プレイリスト取得に失敗しました（チャンネル: ' + (chConf.label || chConf.channelId) + '）', e);
-          return [];
-        }
-      }));
-      const flatVideoItems = perChannelVideoResults.flat();
-
-      // ③ LIVE候補・通常動画候補、両方の動画IDをまとめて詳細確認する（videos APIはまとめて呼べるので節約できる）
-      const liveVideoIds = flatLiveCandidates.map(x => x.videoId);
-      const normalVideoIds = flatVideoItems.map(x => x.playlistItem.snippet.resourceId.videoId).filter(Boolean);
-      const allVideoIds = Array.from(new Set([...liveVideoIds, ...normalVideoIds]));
-      const details = await ytFetchVideoDetails(allVideoIds, apiKey);
-      const detailById = new Map(details.map(d => [d.id, d]));
-
-      const allLive = [];
-      const allVideos = [];
-      const usedLiveVideoIds = new Set();
-
-      // LIVE欄を組み立てる（search APIで「配信中」と確認できたものだけを対象にする）
-      flatLiveCandidates.forEach(({ videoId, chConf }) => {
-        const detail = detailById.get(videoId);
-        // ▼調査用ログ
-        console.log('[AstralHub][調査] videoId=' + videoId + ' の詳細:',
-          detail ? { liveBroadcastContent: detail.snippet && detail.snippet.liveBroadcastContent } : '詳細が取得できませんでした（detailがありません）');
-        if (!detail) return;
-        if (!ytIsCurrentlyLive(detail)) { console.log('[AstralHub][調査] → 二重チェックでliveと判定されず除外されました'); return; } // 念のため二重チェック（確認直後に配信が終わった場合など）
-
-        // ▼タイトルキーワードによる仕分け・絞り込みを適用する
-        const classifiedGameId = classifyGameIdForItem(detail, chConf);
-        if (classifiedGameId === null) {
-          console.log('[AstralHub][調査] → タイトルがどのゲームのキーワードにも一致しないため除外されました:', detail.snippet && detail.snippet.title);
-          return;
-        }
-        allLive.push(ytBuildLiveItem({ ...chConf, gameId: classifiedGameId }, videoId, detail));
-        usedLiveVideoIds.add(videoId);
-      });
-
-      // 通常動画欄を組み立てる（LIVE欄に入ったもの・アーカイブ・ショートは除外する）
-      flatVideoItems.forEach(({ playlistItem, chConf }) => {
-        const videoId = playlistItem.snippet.resourceId.videoId;
-        if (usedLiveVideoIds.has(videoId)) return; // LIVE欄に入っているものは動画欄に重複させない
-        const detail = detailById.get(videoId);
-        if (!detail) return;
-        if (ytIsBroadcastVideo(detail)) return; // 配信が終わったアーカイブは「動画」欄に載せない
-        if (ytIsShort(detail)) return; // ショート動画は除外
-
-        // ▼タイトルキーワードによる仕分け・絞り込みを適用する
-        const classifiedGameId = classifyGameIdForItem(detail, chConf);
-        if (classifiedGameId === null) {
-          console.log('[AstralHub][調査] → タイトルがどのゲームのキーワードにも一致しないため除外されました:', playlistItem.snippet.title);
-          return;
-        }
-        allVideos.push(ytBuildVideoItem({ ...chConf, gameId: classifiedGameId }, playlistItem, detail));
-      });
-
-      // ▼調査用ログ（最終結果）
-      console.log('[AstralHub][調査] 最終的にLIVE欄に入った件数:', allLive.length, allLive);
-
-      localStorage.setItem(STORAGE_KEYS.live, JSON.stringify(allLive));
-      localStorage.setItem(STORAGE_KEYS.videos, JSON.stringify(allVideos));
+      const [liveRows, videoRows] = await Promise.all([
+        apiFetchJson('/api/live'),
+        apiFetchJson('/api/videos?days=30'),
+      ]);
+      cachedLive = liveRows.map(mapLiveRow);
+      cachedVideos = videoRows.map(mapVideoRow);
       localStorage.setItem(YT_LAST_FETCH_KEY, String(Date.now()));
       return true;
     } catch (e) {
-      console.error('[AstralHub] YouTubeデータの取得に失敗しました', e);
+      console.error('[AstralHub] データベースからの取得に失敗しました', e);
       return false;
     }
   }
 
   // 「最終更新はいつか」をHTML側で表示するための情報を返す
   function getYoutubeUpdateInfo(){
-    const cacheConf = (window.ASTRA_CONFIG && window.ASTRA_CONFIG.CACHE_MINUTES) || {};
     let lastFetchAt = null;
     try {
       const v = localStorage.getItem(YT_LAST_FETCH_KEY);
       lastFetchAt = v ? parseInt(v, 10) : null;
     } catch (e) { /* 無視 */ }
-    return {
-      lastFetchAt,
-      liveCacheMinutes: typeof cacheConf.live === 'number' ? cacheConf.live : 0,
-      videoCacheMinutes: typeof cacheConf.videos === 'number' ? cacheConf.videos : 0,
-    };
+    return { lastFetchAt };
   }
   // ▲ここまで追加 ============================================
 
