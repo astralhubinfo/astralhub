@@ -296,11 +296,9 @@ function newsItemWithSummaryHtml(item){
 function renderUpdateNote(){
   const noteEl = document.getElementById('updateNote');
   if (type !== 'live' && type !== 'latest' && type !== 'popular' && type !== 'official') { noteEl.textContent = ''; return; }
-  const { lastFetchAt, liveCacheMinutes, videoCacheMinutes } = getYoutubeUpdateInfo();
-  const cacheMinutes = type === 'live' ? liveCacheMinutes : videoCacheMinutes;
-  const freshLabel = cacheMinutes === 0
-    ? 'リアルタイム更新'
-    : (cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間ごとに更新` : `${cacheMinutes}分ごとに更新`);
+  const { lastFetchAt } = getYoutubeUpdateInfo();
+  // LIVEは5分ごと、動画(人気・新着・公式)は30分ごとに、サーバー側で自動更新される設定になっています
+  const freshLabel = type === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
   noteEl.textContent = `🔄 ${freshLabel}（最終更新：${lastLabel}）`;
 }

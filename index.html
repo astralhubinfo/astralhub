@@ -554,11 +554,9 @@ let mobileTab = 'main';
 // LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度・最終更新時刻の注釈を出す
 // kind: 'live'（配信）は基本リアルタイム、'video'（人気・新着動画）は数分キャッシュ、と表示を分ける
 function updateNoteHtml(kind){
-  const { lastFetchAt, liveCacheMinutes, videoCacheMinutes } = getYoutubeUpdateInfo();
-  const cacheMinutes = kind === 'live' ? liveCacheMinutes : videoCacheMinutes;
-  const freshLabel = cacheMinutes === 0
-    ? 'リアルタイム更新'
-    : (cacheMinutes % 60 === 0 ? `${cacheMinutes / 60}時間ごとに更新` : `${cacheMinutes}分ごとに更新`);
+  const { lastFetchAt } = getYoutubeUpdateInfo();
+  // LIVEは5分ごと、動画(人気・新着)は30分ごとに、サーバー側で自動更新される設定になっています
+  const freshLabel = kind === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
   return `<p class="update-note">🔄 ${freshLabel}（最終更新：${lastLabel}）</p>`;
 }
