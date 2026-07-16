@@ -102,7 +102,45 @@ export default {
       }
     }
 
-    // 窓口5(お掃除用・手動実行専用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
+    // 窓口5:現在LIVE中のチャンネル一覧を取得する(GET /api/live)
+    if (url.pathname === "/api/live" && request.method === "GET") {
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT ls.channel_id, ls.live_video_id, ls.title, ls.thumbnail_url, ls.viewer_count,
+                  c.game, c.channel_name
+           FROM live_status ls
+           JOIN channels c ON c.channel_id = ls.channel_id
+           WHERE ls.is_live = 1
+           ORDER BY ls.viewer_count DESC`
+        ).all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口6:動画一覧を取得する(GET /api/videos?days=30 のように、何日以内かを指定できます)
+    if (url.pathname === "/api/videos" && request.method === "GET") {
+      try {
+        const days = Number(url.searchParams.get("days")) || 30;
+        const { results } = await env.DB.prepare(
+          `SELECT v.video_id, v.channel_id, v.game, v.title, v.thumbnail_url,
+                  v.published_at, v.view_count, v.duration_seconds,
+                  c.channel_name
+           FROM videos v
+           LEFT JOIN channels c ON c.channel_id = v.channel_id
+           WHERE v.published_at >= datetime('now', '-' || ? || ' days')
+           ORDER BY v.published_at DESC`
+        )
+          .bind(days)
+          .all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口7(お掃除用・手動実行専用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
     if (url.pathname === "/api/channels/resubscribe-all" && request.method === "POST") {
       try {
         const { results } = await env.DB.prepare("SELECT channel_id FROM channels").all();
