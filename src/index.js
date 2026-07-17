@@ -57,9 +57,14 @@ export default {
       try {
         const body = await request.json();
         const result = await insertChannel(env.DB, body);
-        await requestWebSubSubscribe(body.channel_id, env).catch(() => {});
-        await syncChannelInitialContent(body.channel_id, body.game, env).catch(() => {});
-        return jsonResponse(result);
+        await requestWebSubSubscribe(body.channel_id, env).catch(err =>
+          console.error("[AstralHub] WebSub登録に失敗しました", err)
+        );
+        const syncResult = await syncChannelInitialContent(body.channel_id, body.game, env).catch(err => {
+          console.error("[AstralHub] 初回の動画取り込みに失敗しました", err);
+          return { synced: 0, error: err.message };
+        });
+        return jsonResponse({ ...result, synced: syncResult.synced, syncError: syncResult.error || null });
       } catch (err) {
         return jsonResponse({ error: err.message }, 400);
       }
@@ -213,15 +218,20 @@ export default {
           url: `https://www.youtube.com/channel/${candidate.channel_id}`,
           game: candidate.game_id,
         });
-        await requestWebSubSubscribe(candidate.channel_id, env).catch(() => {});
-        await syncChannelInitialContent(candidate.channel_id, candidate.game_id, env).catch(() => {});
+        await requestWebSubSubscribe(candidate.channel_id, env).catch(err =>
+          console.error("[AstralHub] WebSub登録に失敗しました", err)
+        );
+        const syncResult = await syncChannelInitialContent(candidate.channel_id, candidate.game_id, env).catch(err => {
+          console.error("[AstralHub] 初回の動画取り込みに失敗しました", err);
+          return { synced: 0, error: err.message };
+        });
         await env.DB.prepare(
           "UPDATE candidate_channels SET status = 'approved' WHERE channel_id = ?"
         )
           .bind(channelId)
           .run();
 
-        return jsonResponse({ success: true });
+        return jsonResponse({ success: true, synced: syncResult.synced, syncError: syncResult.error || null });
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
@@ -283,9 +293,15 @@ async function insertChannel(db, ch) {
   if (!ch.channel_id) {
     throw new Error("channel_id は必須です");
   }
+  // すでに同じチャンネルIDが登録されていた場合は、エラーにせず情報を上書き更新する
+  // (これにより、同じチャンネルを登録し直すだけで動画の再取得ができるようになる)
   await db
     .prepare(
-      "INSERT INTO channels (channel_id, channel_name, url, game) VALUES (?, ?, ?, ?)"
+      `INSERT INTO channels (channel_id, channel_name, url, game) VALUES (?, ?, ?, ?)
+       ON CONFLICT(channel_id) DO UPDATE SET
+         channel_name = excluded.channel_name,
+         url = excluded.url,
+         game = excluded.game`
     )
     .bind(ch.channel_id, ch.channel_name || "", ch.url || "", ch.game || "")
     .run();
@@ -669,11 +685,11 @@ async function fetchRecentUploadItems(uploadsPlaylistId, maxResults, env) {
 // ゲームごとの検索キーワード
 // ※ assets/config.js の GAME_KEYWORDS と同じ内容にしてください(ゲームを追加した場合は両方直す)
 const GAME_KEYWORDS = {
-  genshin: ["原神", "Genshin", "げんしん"],
-  hsr: ["スターレイル", "崩壊：スターレイル", "崩壊:スターレイル", "HSR", "Honkai: Star Rail"],
-  zzz: ["ゼンレスゾーンゼロ", "ゼンゼロ", "ZZZ", "Zenless"],
-  ww: ["鳴潮", "めいちょう", "Wuthering Waves"],
-  nte: ["NTE"],
+  genshin: ["原神", "Genshin", "げんしん", "原神 攻略", "原神 実況", "原神 Vtuber"],
+  hsr: ["スターレイル", "崩壊：スターレイル", "崩壊:スターレイル", "HSR", "Honkai: Star Rail", "スターレイル 攻略", "スターレイル 実況", "スターレイル Vtuber"],
+  zzz: ["ゼンレスゾーンゼロ", "ゼンゼロ", "ZZZ", "Zenless", "ゼンゼロ 攻略", "ゼンゼロ 実況", "ゼンゼロ Vtuber"],
+  ww: ["鳴潮", "めいちょう", "Wuthering Waves", "鳴潮 攻略", "鳴潮 実況", "鳴潮 Vtuber"],
+  nte: ["NTE", "NTE 攻略", "NTE 実況", "NTE Vtuber"],
 };
 
 // 候補として残すための基準
@@ -818,14 +834,32 @@ async function processDiscoveryQueueBatch(env) {
 }
 
 // キーワードで、直近の動画を検索する(YouTube search API)
+// 1回のキーワード検索につき、何ページ分(50件×ページ数)を見に行くか
+// ※人気のあるキーワードだと1ヶ月で50件を超える投稿があり、新しい50件の裏に隠れて
+//   見つからなくなるチャンネルがあるため、複数ページ分をまとめて見に行くようにしている
+const SEARCH_PAGES_PER_KEYWORD = 3; // 50件 × 3ページ = 最大150件まで
+
 async function searchRecentVideosByKeyword(keyword, publishedAfter, env) {
-  const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=50&publishedAfter=${encodeURIComponent(
-    publishedAfter
-  )}&q=${encodeURIComponent(keyword)}&key=${env.YOUTUBE_API_KEY}`;
-  const res = await fetch(apiUrl);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.items || [];
+  const allItems = [];
+  let pageToken = "";
+
+  for (let page = 0; page < SEARCH_PAGES_PER_KEYWORD; page++) {
+    const apiUrl =
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=50` +
+      `&publishedAfter=${encodeURIComponent(publishedAfter)}&q=${encodeURIComponent(keyword)}` +
+      `&key=${env.YOUTUBE_API_KEY}` +
+      (pageToken ? `&pageToken=${pageToken}` : "");
+
+    const res = await fetch(apiUrl);
+    if (!res.ok) break;
+    const data = await res.json();
+    allItems.push(...(data.items || []));
+
+    if (!data.nextPageToken) break; // これ以上ページがなければ終了
+    pageToken = data.nextPageToken;
+  }
+
+  return allItems;
 }
 
 // チャンネルIDの配列から、詳細情報(登録者数・アップロード一覧の場所など)をまとめて取得する
