@@ -269,6 +269,17 @@ export default {
       }
     }
 
+    // 窓口13:動画が0件のチャンネルを、少しずつ再同期する(POST /api/channels/resync-batch)
+    // ※動画取り込みの仕組みを追加する前に登録された、古いチャンネルを救済するための窓口
+    if (url.pathname === "/api/channels/resync-batch" && request.method === "POST") {
+      try {
+        const result = await resyncMissingChannelsBatch(env);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -590,6 +601,45 @@ async function fetchVideosBatched(videoIds, env) {
 // ============================================================
 
 const INITIAL_SYNC_VIDEO_COUNT = 10; // 登録直後に取り込む、直近の動画の件数
+const RESYNC_BATCH_SIZE = 8; // 1回の再同期処理で扱うチャンネル数(通信回数の上限を超えないための設定)
+
+// 「動画も配信情報も1件もないチャンネル」を、少しずつ取り出して再同期する
+// (動画取り込みの仕組みを追加する前に登録された、古いチャンネルを救済するための処理)
+async function resyncMissingChannelsBatch(env) {
+  // ① 動画・配信情報が1件もないチャンネルを、規定件数だけ取り出す(通信1回)
+  const { results: batch } = await env.DB.prepare(
+    `SELECT channel_id, game FROM channels
+     WHERE channel_id NOT IN (SELECT DISTINCT channel_id FROM videos)
+       AND channel_id NOT IN (SELECT DISTINCT channel_id FROM live_status)
+     LIMIT ?`
+  )
+    .bind(RESYNC_BATCH_SIZE)
+    .all();
+
+  if (batch.length === 0) {
+    return { processed: 0, synced: 0, remaining: 0 };
+  }
+
+  // ② 1件ずつ、直近の動画・配信状況を取り込む(通信は該当件数分)
+  let totalSynced = 0;
+  for (const row of batch) {
+    const result = await syncChannelInitialContent(row.channel_id, row.game, env).catch(err => {
+      console.error("[AstralHub] 再同期に失敗しました", row.channel_id, err);
+      return { synced: 0 };
+    });
+    totalSynced += result.synced || 0;
+  }
+
+  // ③ まだ再同期が必要な件数を確認する(通信1回)
+  const { results: remainRows } = await env.DB.prepare(
+    `SELECT COUNT(*) as cnt FROM channels
+     WHERE channel_id NOT IN (SELECT DISTINCT channel_id FROM videos)
+       AND channel_id NOT IN (SELECT DISTINCT channel_id FROM live_status)`
+  ).all();
+  const remaining = remainRows[0] ? remainRows[0].cnt : 0;
+
+  return { processed: batch.length, synced: totalSynced, remaining };
+}
 
 async function syncChannelInitialContent(channelId, gameId, env) {
   // ① チャンネルの「アップロード動画一覧」の場所を取得する(通信1回)
