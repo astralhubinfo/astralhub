@@ -246,6 +246,17 @@ export default {
       }
     }
 
+    // 窓口12:日本語率が未計算の「審査待ちの候補」を、少しずつ再チェックする(POST /api/candidates/rescreen)
+    // ※日本語率の仕組みを追加する前に見つかった、古い候補を今の基準で洗い直すための窓口
+    if (url.pathname === "/api/candidates/rescreen" && request.method === "POST") {
+      try {
+        const result = await rescreenPendingCandidates(env);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -754,4 +765,92 @@ function containsJapaneseKana(title) {
 function matchesAnyKeyword(title, keywords) {
   const lowerTitle = title.toLowerCase();
   return keywords.some(kw => lowerTitle.includes(kw.toLowerCase()));
+}
+
+// 「日本語率が未計算の審査待ち候補」を、少しずつ取り出して今の基準で洗い直す
+// (日本語率の仕組みを追加する前に見つかった古い候補が対象。基準を満たさなければ自動で却下する)
+async function rescreenPendingCandidates(env) {
+  const batchSize = DISCOVER_PROCESS_BATCH_SIZE;
+
+  // ① 日本語率が空(未計算)の審査待ち候補を、古い順に規定件数だけ取り出す(通信1回)
+  const { results: batch } = await env.DB.prepare(
+    `SELECT * FROM candidate_channels
+     WHERE status = 'pending' AND japanese_ratio IS NULL
+     ORDER BY discovered_at ASC LIMIT ?`
+  )
+    .bind(batchSize)
+    .all();
+
+  if (batch.length === 0) {
+    return { processed: 0, kept: 0, rejected: 0, remaining: 0 };
+  }
+
+  // ② チャンネル詳細を、まとめて1回の通信で取得し直す(通信1回)
+  const channelIds = batch.map(row => row.channel_id);
+  const channelDetails = await fetchChannelDetailsBatched(channelIds, env);
+  const detailsMap = new Map(channelDetails.map(ch => [ch.id, ch]));
+
+  const updateStatements = [];
+  const rejectStatements = [];
+  let keptCount = 0;
+  let rejectedCount = 0;
+
+  for (const row of batch) {
+    const ch = detailsMap.get(row.channel_id);
+    if (!ch) {
+      // チャンネル情報が取得できない(削除済みなど) → 却下扱いにする
+      rejectStatements.push(
+        env.DB.prepare("UPDATE candidate_channels SET status = 'rejected' WHERE channel_id = ?").bind(row.channel_id)
+      );
+      rejectedCount++;
+      continue;
+    }
+
+    const subscriberCount = Number(ch.statistics.subscriberCount) || 0;
+    const uploadsPlaylistId = (ch.contentDetails.relatedPlaylists || {}).uploads;
+
+    let recentTitles = [];
+    if (uploadsPlaylistId) {
+      recentTitles = await fetchRecentUploadTitles(uploadsPlaylistId, CANDIDATE_CHECK_VIDEO_COUNT, env);
+    }
+
+    const keywords = GAME_KEYWORDS[row.game_id] || [];
+    const relatedCount = recentTitles.filter(t => matchesAnyKeyword(t, keywords)).length;
+    const relevanceScore = recentTitles.length ? relatedCount / recentTitles.length : 0;
+    const japaneseCount = recentTitles.filter(t => containsJapaneseKana(t)).length;
+    const japaneseRatio = recentTitles.length ? japaneseCount / recentTitles.length : 0;
+
+    const passes =
+      subscriberCount >= CANDIDATE_MIN_SUBSCRIBERS &&
+      relevanceScore >= CANDIDATE_MIN_RELEVANCE &&
+      japaneseRatio >= CANDIDATE_MIN_JAPANESE_RATIO;
+
+    if (!passes) {
+      rejectStatements.push(
+        env.DB.prepare("UPDATE candidate_channels SET status = 'rejected' WHERE channel_id = ?").bind(row.channel_id)
+      );
+      rejectedCount++;
+    } else {
+      updateStatements.push(
+        env.DB.prepare(
+          "UPDATE candidate_channels SET subscriber_count = ?, relevance_score = ?, japanese_ratio = ? WHERE channel_id = ?"
+        ).bind(subscriberCount, relevanceScore, japaneseRatio, row.channel_id)
+      );
+      keptCount++;
+    }
+  }
+
+  // ③ 判定結果を、まとめて1回の通信で反映する(通信1回)
+  const allStatements = [...updateStatements, ...rejectStatements];
+  if (allStatements.length > 0) {
+    await env.DB.batch(allStatements);
+  }
+
+  // ④ まだ再チェックが必要な件数を確認する(通信1回)
+  const { results: remainRows } = await env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM candidate_channels WHERE status = 'pending' AND japanese_ratio IS NULL"
+  ).all();
+  const remaining = remainRows[0] ? remainRows[0].cnt : 0;
+
+  return { processed: batch.length, kept: keptCount, rejected: rejectedCount, remaining };
 }

@@ -639,6 +639,12 @@ function renderDiscoverTab(){
           </select>
         </div>
       </div>
+      <div style="margin-bottom:12px;">
+        <button class="del-btn" id="discoverRescreenBtn">日本語率が未計算の古い候補を再チェックする</button>
+        <p class="hint" style="margin-top:6px;">
+          「候補を探す」機能に日本語の絞り込みを追加する前に見つかっていた候補を、今の基準（登録者数・関連度・日本語率）で洗い直し、基準を満たさないものを自動で却下します。
+        </p>
+      </div>
       <div id="discoverResultsList" class="discover-list"></div>
     </div>
   `;
@@ -646,6 +652,7 @@ function renderDiscoverTab(){
   renderDiscoverResultsList();
 
   document.getElementById('discoverSearchBtn').addEventListener('click', handleDiscoverSearch);
+  document.getElementById('discoverRescreenBtn').addEventListener('click', handleDiscoverRescreen);
   document.getElementById('discoverFilterGameSelect').addEventListener('change', (e) => {
     discoverFilterGameId = e.target.value;
     loadPendingCandidates();
@@ -769,6 +776,44 @@ async function handleDiscoverSearch(){
   } finally {
     btn.disabled = false;
     btn.textContent = '候補を探す';
+  }
+}
+
+// 「日本語率が未計算の古い候補」を、箱が空になるまで少しずつ再チェックする
+async function apiRescreenBatch(){
+  const res = await fetch('/api/candidates/rescreen', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '再チェックに失敗しました');
+  }
+  return res.json();
+}
+
+async function handleDiscoverRescreen(){
+  const btn = document.getElementById('discoverRescreenBtn');
+  btn.disabled = true;
+
+  try {
+    let totalKept = 0;
+    let totalRejected = 0;
+    let remaining = 1;
+    while (remaining > 0) {
+      btn.textContent = `再チェック中…（残り約${remaining}件）`;
+      const r = await apiRescreenBatch();
+      totalKept += r.kept || 0;
+      totalRejected += r.rejected || 0;
+      remaining = r.remaining || 0;
+      if (!r.processed) break; // 念のための安全装置(無限ループ防止)
+    }
+
+    showToast(`再チェック完了：${totalKept}件が基準を満たして残り、${totalRejected}件を却下しました`);
+    await loadPendingCandidates();
+  } catch (e) {
+    console.error('[AstralHub] 候補の再チェックに失敗しました', e);
+    showToast(e.message || '再チェックに失敗しました');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '日本語率が未計算の古い候補を再チェックする';
   }
 }
 // ▲ここまで追加 ============================================
