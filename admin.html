@@ -553,16 +553,26 @@ if (sessionStorage.getItem(AUTH_SESSION_KEY) === '1') {
 let pendingCandidates = []; // 審査待ちの候補一覧（GET /api/candidates の結果）
 let discoverFilterGameId = ''; // 候補一覧の絞り込み（空文字なら全ゲーム）
 
-// サーバーに「候補を探して」と依頼する
-async function apiRunDiscover(gameId){
-  const res = await fetch('/api/discover', {
+// サーバーに「このキーワードで検索して」と依頼する(1キーワードずつ)
+async function apiDiscoverSearchKeyword(gameId, keyword){
+  const res = await fetch('/api/discover/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(gameId ? { gameId } : {}),
+    body: JSON.stringify({ gameId, keyword }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || '検索に失敗しました');
+    throw new Error(err.error || `検索に失敗しました(キーワード：${keyword})`);
+  }
+  return res.json();
+}
+
+// サーバーに「審査待ちの箱を少しだけ処理して」と依頼する(空になるまで繰り返し呼び出す)
+async function apiDiscoverProcessBatch(){
+  const res = await fetch('/api/discover/process', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '審査処理に失敗しました');
   }
   return res.json();
 }
@@ -599,6 +609,7 @@ function renderDiscoverTab(){
       <p class="hint">
         対象ゲームを選んで「候補を探す」を押すと、サーバーがYouTubeを検索し、
         「登録者数100人以上」「直近の投稿の3割以上がそのゲーム」「直近1ヶ月以内に関連動画を投稿」
+        「直近の投稿の5割以上が日本語(ひらがな・カタカナを含む)」
         の3つの基準をすべて満たすチャンネルだけを、下の審査待ちリストに自動で追加します。<br>
         ※1回の検索でAPIの利用量をまとめて消費します（1ゲームあたり数分かかることがあります）。
       </p>
@@ -669,6 +680,7 @@ function renderDiscoverResultsList(){
     const g = gameById(c.game_id);
     const lastDate = c.last_related_video_at ? new Date(c.last_related_video_at).toLocaleDateString('ja-JP') : '不明';
     const relevancePercent = Math.round((c.relevance_score || 0) * 100);
+    const japanesePercent = Math.round((c.japanese_ratio || 0) * 100);
     return `
     <div class="discover-item" style="cursor:default;">
       <img class="discover-thumb" src="${c.thumbnail_url || ''}" alt="" onerror="this.style.visibility='hidden'">
@@ -676,7 +688,7 @@ function renderDiscoverResultsList(){
         <span class="discover-name">${c.channel_name}
           <span class="swatch-tag" style="background:${g ? g.color : '#999'}; margin-left:6px;">${g ? g.name : c.game_id}</span>
         </span>
-        <span class="discover-meta">登録者 ${(c.subscriber_count || 0).toLocaleString()}人 ／ 関連度 ${relevancePercent}% ／ 直近の関連動画：${lastDate}</span>
+        <span class="discover-meta">登録者 ${(c.subscriber_count || 0).toLocaleString()}人 ／ 関連度 ${relevancePercent}% ／ 日本語率 ${japanesePercent}% ／ 直近の関連動画：${lastDate}</span>
         <span class="discover-id">${c.channel_id}</span>
       </span>
       <div style="display:flex; gap:6px; flex-shrink:0;">
@@ -714,14 +726,38 @@ async function handleCandidateDecision(channelId, action){
 
 async function handleDiscoverSearch(){
   const gameId = document.getElementById('discoverGameSelect').value;
+  const targetGameIds = gameId ? [gameId] : GAMES.map(g => g.id);
+  const gameKeywords = (window.ASTRA_CONFIG && window.ASTRA_CONFIG.GAME_KEYWORDS) || {};
+
   const btn = document.getElementById('discoverSearchBtn');
   btn.disabled = true;
-  btn.textContent = '検索中…（少し時間がかかります）';
 
   try {
-    const result = await apiRunDiscover(gameId);
-    const totalAdded = (result.summary || []).reduce((sum, s) => sum + (s.added || 0), 0);
-    const totalFound = (result.summary || []).reduce((sum, s) => sum + (s.found || 0), 0);
+    // ①キーワードを1つずつサーバーに送って検索してもらう(Cloudflareの通信回数上限を超えないため)
+    let totalFound = 0;
+    let totalQueued = 0;
+    for (const gid of targetGameIds) {
+      const keywords = gameKeywords[gid] || [];
+      const gameName = (gameById(gid) || {}).name || gid;
+      for (const keyword of keywords) {
+        btn.textContent = `検索中…（${gameName}：${keyword}）`;
+        const r = await apiDiscoverSearchKeyword(gid, keyword);
+        totalFound += r.found || 0;
+        totalQueued += r.queued || 0;
+      }
+    }
+
+    // ②見つかった候補を、箱が空になるまで少しずつ審査してもらう
+    let totalAdded = 0;
+    let remaining = totalQueued;
+    while (remaining > 0) {
+      btn.textContent = `審査中…（残り約${remaining}件）`;
+      const r = await apiDiscoverProcessBatch();
+      totalAdded += r.added || 0;
+      remaining = r.remaining || 0;
+      if (!r.processed) break; // 念のための安全装置(無限ループ防止)
+    }
+
     showToast(`検索完了：${totalFound}件見つかり、うち${totalAdded}件が基準を満たしました`);
     await loadPendingCandidates();
   } catch (e) {

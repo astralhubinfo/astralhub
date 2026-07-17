@@ -140,24 +140,35 @@ export default {
       }
     }
 
-    // 窓口7:チャンネル自動発掘を実行する(POST /api/discover)
-    // body例: { "gameId": "genshin" } ※省略した場合は全ゲームまとめて実行します
-    if (url.pathname === "/api/discover" && request.method === "POST") {
+    // 窓口7:キーワードを1つ検索し、見つかったチャンネルを「審査待ちの箱」に入れる(POST /api/discover/search)
+    // body例: { "gameId": "genshin", "keyword": "原神" }
+    // ※1回あたりの通信量を抑えるため、検索だけを行い、詳しい審査は次の窓口(8)で小分けに行います
+    if (url.pathname === "/api/discover/search" && request.method === "POST") {
       try {
         const body = await request.json().catch(() => ({}));
-        const targetGameIds = body.gameId ? [body.gameId] : Object.keys(GAME_KEYWORDS);
-        const summary = [];
-        for (const gameId of targetGameIds) {
-          const result = await discoverCandidatesForGame(gameId, env);
-          summary.push({ gameId, ...result });
+        if (!body.gameId || !body.keyword) {
+          return jsonResponse({ error: "gameId と keyword は必須です" }, 400);
         }
-        return jsonResponse({ summary });
+        const result = await queueSearchResults(body.gameId, body.keyword, env);
+        return jsonResponse(result);
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
     }
 
-    // 窓口8:候補チャンネル一覧を取得する(GET /api/candidates?status=pending&gameId=genshin)
+    // 窓口8:「審査待ちの箱」から少しずつ(規定件数まで)取り出して審査する(POST /api/discover/process)
+    // ※Cloudflareの「1回の実行につき外部通信50回まで」という上限を超えないよう、少しずつ処理します。
+    //   箱が空になるまで、admin.html側からこの窓口を繰り返し呼び出します。
+    if (url.pathname === "/api/discover/process" && request.method === "POST") {
+      try {
+        const result = await processDiscoveryQueueBatch(env);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口9:候補チャンネル一覧を取得する(GET /api/candidates?status=pending&gameId=genshin)
     if (url.pathname === "/api/candidates" && request.method === "GET") {
       try {
         const status = url.searchParams.get("status") || "pending";
@@ -178,7 +189,7 @@ export default {
       }
     }
 
-    // 窓口9:候補チャンネルを承認して本登録する(POST /api/candidates/:channel_id/approve)
+    // 窓口10:候補チャンネルを承認して本登録する(POST /api/candidates/:channel_id/approve)
     if (
       url.pathname.startsWith("/api/candidates/") &&
       url.pathname.endsWith("/approve") &&
@@ -214,7 +225,7 @@ export default {
       }
     }
 
-    // 窓口10:候補チャンネルを不採用にする(POST /api/candidates/:channel_id/reject)
+    // 窓口11:候補チャンネルを不採用にする(POST /api/candidates/:channel_id/reject)
     if (
       url.pathname.startsWith("/api/candidates/") &&
       url.pathname.endsWith("/reject") &&
@@ -559,11 +570,17 @@ const GAME_KEYWORDS = {
 // 候補として残すための基準
 const CANDIDATE_MIN_SUBSCRIBERS = 100; // 登録者数がこれ未満は除外
 const CANDIDATE_MIN_RELEVANCE = 0.3; // 直近動画のうち、このゲームの動画の割合がこれ未満は除外
+const CANDIDATE_MIN_JAPANESE_RATIO = 0.5; // 直近動画のうち、ひらがな・カタカナを含むタイトルの割合がこれ未満は除外
 const CANDIDATE_ACTIVITY_DAYS = 30; // この日数以内にそのゲームの動画がなければ除外
 const CANDIDATE_CHECK_VIDEO_COUNT = 20; // 関連度を調べるとき、直近何件の動画をチェックするか
 
-// 1つのゲームについて、候補チャンネルを検索→精査→保存する
-async function discoverCandidatesForGame(gameId, env) {
+// Cloudflareの「1回の実行につき外部通信50回まで」という上限を超えないための設定
+// ※1回の審査処理(processDiscoveryQueueBatch)で扱うチャンネル数の上限
+//   計算の目安:1(取得)+1(チャンネル詳細)+この件数分(直近投稿チェック)+1(保存)+1(削除)+1(残り件数確認) < 50
+const DISCOVER_PROCESS_BATCH_SIZE = 20;
+
+// 【フェーズA】1つのキーワードで検索し、見つかったチャンネルを「審査待ちの箱」に入れるだけ(通信量は少ない)
+async function queueSearchResults(gameId, keyword, env) {
   const keywords = GAME_KEYWORDS[gameId];
   if (!keywords) {
     throw new Error(`gameId「${gameId}」のキーワードが見つかりません`);
@@ -573,90 +590,122 @@ async function discoverCandidatesForGame(gameId, env) {
     Date.now() - CANDIDATE_ACTIVITY_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  // ① キーワードごとに直近1ヶ月の動画を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める
-  const foundChannels = new Map(); // channelId -> { lastRelatedVideoAt }
-  for (const keyword of keywords) {
-    const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env);
-    for (const item of items) {
-      const channelId = item.snippet.channelId;
-      const publishedAt = item.snippet.publishedAt;
-      const existing = foundChannels.get(channelId);
-      if (!existing || publishedAt > existing.lastRelatedVideoAt) {
-        foundChannels.set(channelId, { lastRelatedVideoAt: publishedAt });
-      }
+  // ① 直近1ヶ月の動画を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める(通信1回)
+  const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env);
+  const found = new Map(); // channelId -> lastRelatedVideoAt
+  for (const item of items) {
+    const channelId = item.snippet.channelId;
+    const publishedAt = item.snippet.publishedAt;
+    const existing = found.get(channelId);
+    if (!existing || publishedAt > existing) {
+      found.set(channelId, publishedAt);
     }
   }
 
-  if (foundChannels.size === 0) {
-    return { found: 0, added: 0 };
+  if (found.size === 0) {
+    return { found: 0, queued: 0 };
   }
 
-  // ② すでに本登録済み・すでに候補になっているチャンネルは除外する
-  const existingIds = await getExistingChannelIds(env);
-  const newChannelIds = [...foundChannels.keys()].filter(id => !existingIds.has(id));
+  // ② すでに「本登録済み」「候補として保存済み」「審査待ちの箱に入っている」チャンネルは除外する(通信1回)
+  const { results: existingRows } = await env.DB.prepare(
+    `SELECT channel_id FROM channels
+     UNION SELECT channel_id FROM candidate_channels
+     UNION SELECT channel_id FROM discovery_queue`
+  ).all();
+  const existingIds = new Set(existingRows.map(r => r.channel_id));
 
-  if (newChannelIds.length === 0) {
-    return { found: foundChannels.size, added: 0 };
+  const newEntries = [...found.entries()].filter(([channelId]) => !existingIds.has(channelId));
+  if (newEntries.length === 0) {
+    return { found: found.size, queued: 0 };
   }
 
-  // ③ チャンネルの詳細情報(登録者数など)をまとめて取得し、登録者数でふるいにかける
-  const channelDetails = await fetchChannelDetailsBatched(newChannelIds, env);
-  const bySubscribers = channelDetails.filter(
-    ch => (Number(ch.statistics.subscriberCount) || 0) >= CANDIDATE_MIN_SUBSCRIBERS
+  // ③ 新しいチャンネルだけを、まとめて1回の通信で「審査待ちの箱」に入れる(通信1回)
+  const statements = newEntries.map(([channelId, lastRelatedVideoAt]) =>
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO discovery_queue (channel_id, game_id, last_related_video_at) VALUES (?, ?, ?)`
+    ).bind(channelId, gameId, lastRelatedVideoAt)
   );
+  await env.DB.batch(statements);
 
-  // ④ 残ったチャンネルについて、直近の投稿を調べて「関連度」を計算する
+  return { found: found.size, queued: newEntries.length };
+}
+
+// 【フェーズB】「審査待ちの箱」から少しずつ(規定件数まで)取り出して、登録者数・関連度を審査する
+async function processDiscoveryQueueBatch(env) {
+  // ① 箱の中から、古い順に規定件数だけ取り出す(通信1回)
+  const { results: batch } = await env.DB.prepare(
+    "SELECT * FROM discovery_queue ORDER BY queued_at ASC LIMIT ?"
+  )
+    .bind(DISCOVER_PROCESS_BATCH_SIZE)
+    .all();
+
+  if (batch.length === 0) {
+    return { processed: 0, added: 0, remaining: 0 };
+  }
+
+  // ② 取り出した分のチャンネル詳細(登録者数など)を、まとめて1回の通信で取得する(通信1回、最大50件まで対応)
+  const channelIds = batch.map(row => row.channel_id);
+  const channelDetails = await fetchChannelDetailsBatched(channelIds, env);
+  const detailsMap = new Map(channelDetails.map(ch => [ch.id, ch]));
+
+  // ③ 1件ずつ、登録者数→直近の投稿(関連度)の順にチェックする(通信は該当件数分)
+  const insertStatements = [];
   let addedCount = 0;
-  for (const ch of bySubscribers) {
+
+  for (const row of batch) {
+    const ch = detailsMap.get(row.channel_id);
+    if (!ch) continue; // 情報が取得できなかった(削除済みチャンネルなど)
+
+    const subscriberCount = Number(ch.statistics.subscriberCount) || 0;
+    if (subscriberCount < CANDIDATE_MIN_SUBSCRIBERS) continue;
+
     const uploadsPlaylistId = (ch.contentDetails.relatedPlaylists || {}).uploads;
     if (!uploadsPlaylistId) continue;
 
-    const recentTitles = await fetchRecentUploadTitles(
-      uploadsPlaylistId,
-      CANDIDATE_CHECK_VIDEO_COUNT,
-      env
-    );
+    const keywords = GAME_KEYWORDS[row.game_id] || [];
+    const recentTitles = await fetchRecentUploadTitles(uploadsPlaylistId, CANDIDATE_CHECK_VIDEO_COUNT, env);
     if (recentTitles.length === 0) continue;
 
     const relatedCount = recentTitles.filter(t => matchesAnyKeyword(t, keywords)).length;
     const relevanceScore = relatedCount / recentTitles.length;
-
     if (relevanceScore < CANDIDATE_MIN_RELEVANCE) continue;
+
+    const japaneseCount = recentTitles.filter(t => containsJapaneseKana(t)).length;
+    const japaneseRatio = japaneseCount / recentTitles.length;
+    if (japaneseRatio < CANDIDATE_MIN_JAPANESE_RATIO) continue;
 
     const thumbnails = ch.snippet.thumbnails || {};
     const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
-    const lastRelatedVideoAt = foundChannels.get(ch.id).lastRelatedVideoAt;
 
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO candidate_channels
-        (channel_id, channel_name, game_id, subscriber_count, relevance_score, last_related_video_at, thumbnail_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        ch.id,
-        ch.snippet.title || "",
-        gameId,
-        Number(ch.statistics.subscriberCount) || 0,
-        relevanceScore,
-        lastRelatedVideoAt,
-        thumbnail
-      )
-      .run();
-
+    insertStatements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO candidate_channels
+          (channel_id, channel_name, game_id, subscriber_count, relevance_score, japanese_ratio, last_related_video_at, thumbnail_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(ch.id, ch.snippet.title || "", row.game_id, subscriberCount, relevanceScore, japaneseRatio, row.last_related_video_at, thumbnail)
+    );
     addedCount++;
   }
 
-  return { found: foundChannels.size, added: addedCount };
-}
+  // ④ 基準を満たしたチャンネルを、まとめて1回の通信で保存する(通信1回)
+  if (insertStatements.length > 0) {
+    await env.DB.batch(insertStatements);
+  }
 
-// すでに「本登録済み」または「候補として保存済み」のチャンネルIDを集める(重複を避けるため)
-async function getExistingChannelIds(env) {
-  const registered = await env.DB.prepare("SELECT channel_id FROM channels").all();
-  const candidates = await env.DB.prepare("SELECT channel_id FROM candidate_channels").all();
-  const ids = new Set();
-  for (const row of registered.results) ids.add(row.channel_id);
-  for (const row of candidates.results) ids.add(row.channel_id);
-  return ids;
+  // ⑤ 今回審査した分は、合否に関わらず箱から取り除く(通信1回)
+  await env.DB.prepare(
+    `DELETE FROM discovery_queue WHERE channel_id IN (${channelIds.map(() => "?").join(",")})`
+  )
+    .bind(...channelIds)
+    .run();
+
+  // ⑥ 箱にまだ残っている件数を確認する(通信1回)
+  const { results: remainRows } = await env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM discovery_queue"
+  ).all();
+  const remaining = remainRows[0] ? remainRows[0].cnt : 0;
+
+  return { processed: batch.length, added: addedCount, remaining };
 }
 
 // キーワードで、直近の動画を検索する(YouTube search API)
@@ -693,6 +742,12 @@ async function fetchRecentUploadTitles(uploadsPlaylistId, maxResults, env) {
   if (!res.ok) return [];
   const data = await res.json();
   return (data.items || []).map(item => item.snippet.title || "");
+}
+
+// タイトルに、ひらがな・カタカナが含まれているか判定する(日本語チャンネルかどうかの目印として使う)
+function containsJapaneseKana(title) {
+  // ひらがな:\u3040-\u309F、カタカナ:\u30A0-\u30FF(長音符ーなどを含む)
+  return /[\u3040-\u309F\u30A0-\u30FF]/.test(title);
 }
 
 // タイトルが、指定したキーワードのどれかを含んでいるか判定する
