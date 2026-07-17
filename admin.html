@@ -550,7 +550,8 @@ if (sessionStorage.getItem(AUTH_SESSION_KEY) === '1') {
 //       ここ（admin.html）では、①検索の実行ボタン ②ふるいに残った候補の確認・採用/却下 だけを行う。
 // ポイント：検索やAPIキーの利用はすべてサーバー側で行われるため、ブラウザ側にAPIキーは一切出てこない。
 
-let pendingCandidates = []; // 審査待ちの候補一覧（GET /api/candidates の結果）
+let discoverCandidates = []; // 表示中の候補一覧（GET /api/candidates の結果。審査待ち or 却下済み）
+let discoverStatusFilter = 'pending'; // 表示する候補の状態（pending=審査待ち／rejected=却下済み）
 let discoverFilterGameId = ''; // 候補一覧の絞り込み（空文字なら全ゲーム）
 
 // サーバーに「このキーワードで検索して」と依頼する(1キーワードずつ)
@@ -577,10 +578,11 @@ async function apiDiscoverProcessBatch(){
   return res.json();
 }
 
-// 審査待ちの候補一覧を取得する
-async function apiGetCandidates(gameId){
-  const query = gameId ? `?status=pending&gameId=${encodeURIComponent(gameId)}` : '?status=pending';
-  const res = await fetch('/api/candidates' + query);
+// 審査待ち・却下済みの候補一覧を取得する
+async function apiGetCandidates(status, gameId){
+  const params = new URLSearchParams({ status: status || 'pending' });
+  if (gameId) params.set('gameId', gameId);
+  const res = await fetch('/api/candidates?' + params.toString());
   if (!res.ok) throw new Error('候補一覧の取得に失敗しました');
   return res.json();
 }
@@ -628,9 +630,16 @@ function renderDiscoverTab(){
     </div>
 
     <div class="panel">
-      <h2>審査待ちの候補（${pendingCandidates.length}件）</h2>
+      <h2 id="discoverListHeading">審査待ちの候補（${discoverCandidates.length}件）</h2>
       <p class="hint">「採用する」を押すと、そのままチャンネル一覧に本登録され、動画・配信の自動取得が始まります。</p>
       <div class="form-grid">
+        <div class="field">
+          <label>表示する候補</label>
+          <select id="discoverStatusSelect">
+            <option value="pending" ${discoverStatusFilter === 'pending' ? 'selected' : ''}>審査待ち</option>
+            <option value="rejected" ${discoverStatusFilter === 'rejected' ? 'selected' : ''}>却下済み</option>
+          </select>
+        </div>
         <div class="field">
           <label>絞り込み（ゲーム）</label>
           <select id="discoverFilterGameSelect">
@@ -657,6 +666,10 @@ function renderDiscoverTab(){
     discoverFilterGameId = e.target.value;
     loadPendingCandidates();
   });
+  document.getElementById('discoverStatusSelect').addEventListener('change', (e) => {
+    discoverStatusFilter = e.target.value;
+    loadPendingCandidates();
+  });
 
   loadPendingCandidates();
 }
@@ -665,29 +678,41 @@ async function loadPendingCandidates(){
   const wrap = document.getElementById('discoverResultsList');
   if (wrap) wrap.innerHTML = '<p class="hint">読み込み中…</p>';
   try {
-    pendingCandidates = await apiGetCandidates(discoverFilterGameId);
+    discoverCandidates = await apiGetCandidates(discoverStatusFilter, discoverFilterGameId);
   } catch (e) {
     showToast(e.message || '候補一覧の取得に失敗しました');
-    pendingCandidates = [];
+    discoverCandidates = [];
   }
   if (activeType !== 'discover') return; // 読み込み中にタブが切り替えられていたら何もしない
-  const heading = document.querySelector('#tabContent .panel:nth-child(2) h2');
-  if (heading) heading.textContent = `審査待ちの候補（${pendingCandidates.length}件）`;
+  updateDiscoverHeading();
   renderDiscoverResultsList();
+}
+
+function updateDiscoverHeading(){
+  const heading = document.getElementById('discoverListHeading');
+  const label = discoverStatusFilter === 'rejected' ? '却下済みの候補' : '審査待ちの候補';
+  if (heading) heading.textContent = `${label}（${discoverCandidates.length}件）`;
 }
 
 function renderDiscoverResultsList(){
   const wrap = document.getElementById('discoverResultsList');
   if (!wrap) return;
-  if (pendingCandidates.length === 0) {
-    wrap.innerHTML = '<p class="hint">審査待ちの候補はありません。「候補を探す」を押して検索してください。</p>';
+  const isPending = discoverStatusFilter === 'pending';
+  if (discoverCandidates.length === 0) {
+    wrap.innerHTML = isPending
+      ? '<p class="hint">審査待ちの候補はありません。「候補を探す」を押して検索してください。</p>'
+      : '<p class="hint">却下済みの候補はありません。</p>';
     return;
   }
-  wrap.innerHTML = pendingCandidates.map(c => {
+  wrap.innerHTML = discoverCandidates.map(c => {
     const g = gameById(c.game_id);
     const lastDate = c.last_related_video_at ? new Date(c.last_related_video_at).toLocaleDateString('ja-JP') : '不明';
     const relevancePercent = Math.round((c.relevance_score || 0) * 100);
     const japanesePercent = Math.round((c.japanese_ratio || 0) * 100);
+    const actionsHtml = isPending
+      ? `<button class="submit-btn" data-approve="${c.channel_id}" style="padding:7px 12px;">採用する</button>
+         <button class="del-btn" data-reject="${c.channel_id}">却下する</button>`
+      : `<span class="hint" style="white-space:nowrap;">却下済み</span>`;
     return `
     <div class="discover-item" style="cursor:default;">
       <a href="https://www.youtube.com/channel/${c.channel_id}" target="_blank" rel="noopener" title="YouTubeでチャンネルを見る">
@@ -702,11 +727,12 @@ function renderDiscoverResultsList(){
         <span class="discover-id">${c.channel_id}</span>
       </span>
       <div style="display:flex; gap:6px; flex-shrink:0;">
-        <button class="submit-btn" data-approve="${c.channel_id}" style="padding:7px 12px;">採用する</button>
-        <button class="del-btn" data-reject="${c.channel_id}">却下する</button>
+        ${actionsHtml}
       </div>
     </div>`;
   }).join('');
+
+  if (!isPending) return; // 却下済み表示の場合はボタンがないのでここで終了
 
   wrap.querySelectorAll('[data-approve]').forEach(btn => {
     btn.addEventListener('click', () => handleCandidateDecision(btn.dataset.approve, 'approve'));
@@ -725,10 +751,9 @@ async function handleCandidateDecision(channelId, action){
       await apiRejectCandidate(channelId);
       showToast('却下しました');
     }
-    pendingCandidates = pendingCandidates.filter(c => c.channel_id !== channelId);
+    discoverCandidates = discoverCandidates.filter(c => c.channel_id !== channelId);
     renderDiscoverResultsList();
-    const heading = document.querySelector('#tabContent .panel:nth-child(2) h2');
-    if (heading) heading.textContent = `審査待ちの候補（${pendingCandidates.length}件）`;
+    updateDiscoverHeading();
   } catch (e) {
     showToast(e.message || '処理に失敗しました');
   }
