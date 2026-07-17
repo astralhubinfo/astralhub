@@ -140,21 +140,6 @@ export default {
       }
     }
 
-    // 窓口7(お掃除用・手動実行専用):今すでに登録されている全チャンネル分、まとめて通知をお願いする
-    if (url.pathname === "/api/channels/resubscribe-all" && request.method === "POST") {
-      try {
-        const { results } = await env.DB.prepare("SELECT channel_id FROM channels").all();
-        const done = [];
-        for (const row of results) {
-          await requestWebSubSubscribe(row.channel_id, env).catch(() => {});
-          done.push(row.channel_id);
-        }
-        return jsonResponse({ requested: done });
-      } catch (err) {
-        return jsonResponse({ error: err.message }, 500);
-      }
-    }
-
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
