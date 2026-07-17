@@ -544,184 +544,192 @@ if (sessionStorage.getItem(AUTH_SESSION_KEY) === '1') {
 }
 // ▲ここまで追加 ============================================
 
-// ▼ここから追加：チャンネル発掘機能（半自動化） ============================================
-// 役割：管理者がキーワードを入力すると、YouTubeのsearch API（type=channel）で候補チャンネルを探し、
-//       チェックした分だけ config.js の YOUTUBE_CHANNELS 形式のコードに変換して出力する。
-// 注意：search APIは他のAPIより消費（クォータ）が大きいため、むやみに何度も検索しないよう
-//       hintでも案内している。
+// ▼ここから追加：チャンネル自動発掘・精査機能（完全自動化） ============================================
+// 役割：サーバー側（Cloudflare Workers）が、ゲームごとのキーワードでYouTubeを検索し、
+//       「登録者数」「関連度」「直近1ヶ月の活動」の3つの基準で自動的にふるい分けを行う。
+//       ここ（admin.html）では、①検索の実行ボタン ②ふるいに残った候補の確認・採用/却下 だけを行う。
+// ポイント：検索やAPIキーの利用はすべてサーバー側で行われるため、ブラウザ側にAPIキーは一切出てこない。
 
-let discoverResults = []; // 検索結果（{channelId, title, thumbnail, subscriberCount, checked}の配列）
+let pendingCandidates = []; // 審査待ちの候補一覧（GET /api/candidates の結果）
+let discoverFilterGameId = ''; // 候補一覧の絞り込み（空文字なら全ゲーム）
 
-async function ytFetchJson(url){
-  const res = await fetch(url);
+// サーバーに「候補を探して」と依頼する
+async function apiRunDiscover(gameId){
+  const res = await fetch('/api/discover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(gameId ? { gameId } : {}),
+  });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error('YouTube APIエラー: ' + res.status + ' ' + body);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '検索に失敗しました');
   }
   return res.json();
 }
 
-function chunkArray(arr, size){
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+// 審査待ちの候補一覧を取得する
+async function apiGetCandidates(gameId){
+  const query = gameId ? `?status=pending&gameId=${encodeURIComponent(gameId)}` : '?status=pending';
+  const res = await fetch('/api/candidates' + query);
+  if (!res.ok) throw new Error('候補一覧の取得に失敗しました');
+  return res.json();
 }
 
-// キーワードでチャンネルを検索し、登録者数もあわせて取得する
-async function searchYouTubeChannels(keyword, apiKey){
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=25&q=${encodeURIComponent(keyword)}&key=${apiKey}`;
-  const data = await ytFetchJson(url);
-  const items = data.items || [];
-  const channelIds = items.map(it => it.snippet && it.snippet.channelId).filter(Boolean);
-  const statsMap = await fetchChannelStats(channelIds, apiKey);
-
-  return items.map(it => {
-    const channelId = it.snippet.channelId;
-    const stats = statsMap.get(channelId) || {};
-    return {
-      channelId,
-      title: it.snippet.title,
-      thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default) || {}).url || '',
-      subscriberCount: (!stats.hiddenSubscriberCount && stats.subscriberCount) ? parseInt(stats.subscriberCount, 10) : null,
-    };
-  });
-}
-
-// チャンネルIDの一覧から、登録者数などの統計情報をまとめて取得する（最大50件ずつ）
-async function fetchChannelStats(channelIds, apiKey){
-  const map = new Map();
-  for (const chunk of chunkArray(channelIds, 50)) {
-    if (chunk.length === 0) continue;
-    const url = `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${chunk.join(',')}&key=${apiKey}`;
-    const data = await ytFetchJson(url);
-    (data.items || []).forEach(ch => map.set(ch.id, ch.statistics || {}));
+// 候補を採用する（本登録される）
+async function apiApproveCandidate(channelId){
+  const res = await fetch('/api/candidates/' + encodeURIComponent(channelId) + '/approve', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '採用に失敗しました');
   }
-  return map;
+  return res.json();
+}
+
+// 候補を却下する
+async function apiRejectCandidate(channelId){
+  const res = await fetch('/api/candidates/' + encodeURIComponent(channelId) + '/reject', { method: 'POST' });
+  if (!res.ok) throw new Error('却下に失敗しました');
+  return res.json();
 }
 
 function renderDiscoverTab(){
   const html = `
     <div class="panel">
-      <h2>新しいチャンネルを探す</h2>
+      <h2>新しい候補を自動で探す</h2>
       <p class="hint">
-        キーワードでYouTubeのチャンネルを検索できます。見つかった候補の中から登録したいものにチェックを入れ、
-        「コードに変換する」を押すと、config.js にそのまま貼り付けられる形式で出力されます。<br>
-        ※検索1回ごとにAPIの利用量を多めに消費します。むやみに何度も検索しないようご注意ください。
+        対象ゲームを選んで「候補を探す」を押すと、サーバーがYouTubeを検索し、
+        「登録者数100人以上」「直近の投稿の3割以上がそのゲーム」「直近1ヶ月以内に関連動画を投稿」
+        の3つの基準をすべて満たすチャンネルだけを、下の審査待ちリストに自動で追加します。<br>
+        ※1回の検索でAPIの利用量をまとめて消費します（1ゲームあたり数分かかることがあります）。
       </p>
       <div class="form-grid">
         <div class="field">
-          <label>対応ゲーム（チェックした全チャンネルに適用されます）</label>
-          <select id="discoverGameSelect">${GAMES.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}</select>
-        </div>
-        <div class="field full">
-          <label>検索キーワード</label>
-          <input type="text" id="discoverKeyword" placeholder="例：原神 公式 切り抜き">
+          <label>対象ゲーム</label>
+          <select id="discoverGameSelect">
+            <option value="">すべてのゲーム</option>
+            ${GAMES.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+          </select>
         </div>
       </div>
       <div style="display:flex; gap:8px;">
-        <button class="submit-btn" id="discoverSearchBtn">新しいチャンネルを探す</button>
+        <button class="submit-btn" id="discoverSearchBtn">候補を探す</button>
       </div>
     </div>
 
-    <div class="panel" id="discoverResultsPanel" style="${discoverResults.length ? '' : 'display:none;'}">
-      <h2>検索結果（登録したいものにチェック）</h2>
+    <div class="panel">
+      <h2>審査待ちの候補（${pendingCandidates.length}件）</h2>
+      <p class="hint">「採用する」を押すと、そのままチャンネル一覧に本登録され、動画・配信の自動取得が始まります。</p>
+      <div class="form-grid">
+        <div class="field">
+          <label>絞り込み（ゲーム）</label>
+          <select id="discoverFilterGameSelect">
+            <option value="">すべてのゲーム</option>
+            ${GAMES.map(g => `<option value="${g.id}" ${discoverFilterGameId === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div id="discoverResultsList" class="discover-list"></div>
-      <div style="display:flex; gap:8px; margin-top:14px;">
-        <button class="submit-btn" id="discoverGenerateBtn">選んだチャンネルをコードに変換する</button>
-      </div>
-    </div>
-
-    <div class="panel" id="discoverOutputPanel" style="display:none;">
-      <h2>config.js に貼り付けるコード</h2>
-      <p class="hint">下のコードをコピーして、config.js の YOUTUBE_CHANNELS の配列の中に貼り付けてください。</p>
-      <div class="field full"><textarea id="discoverOutput" rows="6" readonly></textarea></div>
-      <div style="display:flex; gap:8px;">
-        <button class="submit-btn" id="discoverCopyBtn">コピーする</button>
-      </div>
     </div>
   `;
   document.getElementById('tabContent').innerHTML = html;
   renderDiscoverResultsList();
 
   document.getElementById('discoverSearchBtn').addEventListener('click', handleDiscoverSearch);
-  document.getElementById('discoverGenerateBtn')?.addEventListener('click', handleDiscoverGenerate);
-  document.getElementById('discoverCopyBtn')?.addEventListener('click', handleDiscoverCopy);
+  document.getElementById('discoverFilterGameSelect').addEventListener('change', (e) => {
+    discoverFilterGameId = e.target.value;
+    loadPendingCandidates();
+  });
+
+  loadPendingCandidates();
+}
+
+async function loadPendingCandidates(){
+  const wrap = document.getElementById('discoverResultsList');
+  if (wrap) wrap.innerHTML = '<p class="hint">読み込み中…</p>';
+  try {
+    pendingCandidates = await apiGetCandidates(discoverFilterGameId);
+  } catch (e) {
+    showToast(e.message || '候補一覧の取得に失敗しました');
+    pendingCandidates = [];
+  }
+  if (activeType !== 'discover') return; // 読み込み中にタブが切り替えられていたら何もしない
+  const heading = document.querySelector('#tabContent .panel:nth-child(2) h2');
+  if (heading) heading.textContent = `審査待ちの候補（${pendingCandidates.length}件）`;
+  renderDiscoverResultsList();
 }
 
 function renderDiscoverResultsList(){
   const wrap = document.getElementById('discoverResultsList');
   if (!wrap) return;
-  wrap.innerHTML = discoverResults.map((c, idx) => `
-    <label class="discover-item">
-      <input type="checkbox" data-discover-idx="${idx}" ${c.checked ? 'checked' : ''}>
-      <img class="discover-thumb" src="${c.thumbnail}" alt="" onerror="this.style.visibility='hidden'">
-      <span class="discover-info">
-        <span class="discover-name">${c.title}</span>
-        <span class="discover-meta">登録者 ${c.subscriberCount != null ? c.subscriberCount.toLocaleString() + '人' : '非公開'}</span>
-        <span class="discover-id">${c.channelId}</span>
+  if (pendingCandidates.length === 0) {
+    wrap.innerHTML = '<p class="hint">審査待ちの候補はありません。「候補を探す」を押して検索してください。</p>';
+    return;
+  }
+  wrap.innerHTML = pendingCandidates.map(c => {
+    const g = gameById(c.game_id);
+    const lastDate = c.last_related_video_at ? new Date(c.last_related_video_at).toLocaleDateString('ja-JP') : '不明';
+    const relevancePercent = Math.round((c.relevance_score || 0) * 100);
+    return `
+    <div class="discover-item" style="cursor:default;">
+      <img class="discover-thumb" src="${c.thumbnail_url || ''}" alt="" onerror="this.style.visibility='hidden'">
+      <span class="discover-info" style="flex:1;">
+        <span class="discover-name">${c.channel_name}
+          <span class="swatch-tag" style="background:${g ? g.color : '#999'}; margin-left:6px;">${g ? g.name : c.game_id}</span>
+        </span>
+        <span class="discover-meta">登録者 ${(c.subscriber_count || 0).toLocaleString()}人 ／ 関連度 ${relevancePercent}% ／ 直近の関連動画：${lastDate}</span>
+        <span class="discover-id">${c.channel_id}</span>
       </span>
-    </label>
-  `).join('');
-  wrap.querySelectorAll('[data-discover-idx]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      discoverResults[Number(cb.dataset.discoverIdx)].checked = cb.checked;
-    });
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button class="submit-btn" data-approve="${c.channel_id}" style="padding:7px 12px;">採用する</button>
+        <button class="del-btn" data-reject="${c.channel_id}">却下する</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  wrap.querySelectorAll('[data-approve]').forEach(btn => {
+    btn.addEventListener('click', () => handleCandidateDecision(btn.dataset.approve, 'approve'));
   });
+  wrap.querySelectorAll('[data-reject]').forEach(btn => {
+    btn.addEventListener('click', () => handleCandidateDecision(btn.dataset.reject, 'reject'));
+  });
+}
+
+async function handleCandidateDecision(channelId, action){
+  try {
+    if (action === 'approve') {
+      await apiApproveCandidate(channelId);
+      showToast('採用し、本登録しました');
+    } else {
+      await apiRejectCandidate(channelId);
+      showToast('却下しました');
+    }
+    pendingCandidates = pendingCandidates.filter(c => c.channel_id !== channelId);
+    renderDiscoverResultsList();
+    const heading = document.querySelector('#tabContent .panel:nth-child(2) h2');
+    if (heading) heading.textContent = `審査待ちの候補（${pendingCandidates.length}件）`;
+  } catch (e) {
+    showToast(e.message || '処理に失敗しました');
+  }
 }
 
 async function handleDiscoverSearch(){
-  const keyword = document.getElementById('discoverKeyword').value.trim();
-  if (!keyword) { showToast('検索キーワードを入力してください'); return; }
-
-  const apiKey = window.ASTRA_CONFIG.YOUTUBE_API_KEY;
-  if (!apiKey || apiKey.indexOf('ここに') === 0) {
-    showToast('YouTube APIキーが設定されていません（config.jsをご確認ください）');
-    return;
-  }
-
+  const gameId = document.getElementById('discoverGameSelect').value;
   const btn = document.getElementById('discoverSearchBtn');
   btn.disabled = true;
-  btn.textContent = '検索中…';
+  btn.textContent = '検索中…（少し時間がかかります）';
 
   try {
-    const channels = await searchYouTubeChannels(keyword, apiKey);
-    discoverResults = channels.map(c => ({ ...c, checked: false }));
-    document.getElementById('discoverOutputPanel').style.display = 'none';
-    document.getElementById('discoverResultsPanel').style.display = discoverResults.length ? '' : 'none';
-    renderDiscoverResultsList();
-    if (discoverResults.length === 0) showToast('見つかりませんでした。キーワードを変えてお試しください');
+    const result = await apiRunDiscover(gameId);
+    const totalAdded = (result.summary || []).reduce((sum, s) => sum + (s.added || 0), 0);
+    const totalFound = (result.summary || []).reduce((sum, s) => sum + (s.found || 0), 0);
+    showToast(`検索完了：${totalFound}件見つかり、うち${totalAdded}件が基準を満たしました`);
+    await loadPendingCandidates();
   } catch (e) {
-    console.error('[AstralHub] チャンネル検索に失敗しました', e);
-    showToast('検索に失敗しました。APIキーや利用上限をご確認ください');
+    console.error('[AstralHub] チャンネル自動発掘に失敗しました', e);
+    showToast(e.message || '検索に失敗しました');
   } finally {
     btn.disabled = false;
-    btn.textContent = '新しいチャンネルを探す';
-  }
-}
-
-function handleDiscoverGenerate(){
-  const gameId = document.getElementById('discoverGameSelect').value;
-  const selected = discoverResults.filter(c => c.checked);
-  if (selected.length === 0) { showToast('チャンネルを1つ以上選んでください'); return; }
-
-  const lines = selected.map(c => {
-    const safeLabel = String(c.title).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    return `    { channelId: '${c.channelId}', gameId: '${gameId}', label: '${safeLabel}' },`;
-  });
-  const outputPanel = document.getElementById('discoverOutputPanel');
-  document.getElementById('discoverOutput').value = lines.join('\n');
-  outputPanel.style.display = '';
-  outputPanel.scrollIntoView({ behavior: 'smooth' });
-}
-
-function handleDiscoverCopy(){
-  const ta = document.getElementById('discoverOutput');
-  ta.select();
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(ta.value).then(() => showToast('コピーしました')).catch(() => showToast('コピーに失敗しました'));
-  } else {
-    document.execCommand('copy');
-    showToast('コピーしました');
+    btn.textContent = '候補を探す';
   }
 }
 // ▲ここまで追加 ============================================
