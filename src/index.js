@@ -58,6 +58,7 @@ export default {
         const body = await request.json();
         const result = await insertChannel(env.DB, body);
         await requestWebSubSubscribe(body.channel_id, env).catch(() => {});
+        await syncChannelInitialContent(body.channel_id, body.game, env).catch(() => {});
         return jsonResponse(result);
       } catch (err) {
         return jsonResponse({ error: err.message }, 400);
@@ -213,6 +214,7 @@ export default {
           game: candidate.game_id,
         });
         await requestWebSubSubscribe(candidate.channel_id, env).catch(() => {});
+        await syncChannelInitialContent(candidate.channel_id, candidate.game_id, env).catch(() => {});
         await env.DB.prepare(
           "UPDATE candidate_channels SET status = 'approved' WHERE channel_id = ?"
         )
@@ -553,7 +555,7 @@ async function fetchVideosBatched(videoIds, env) {
   const videoMap = {};
   for (let i = 0; i < videoIds.length; i += 50) {
     const chunk = videoIds.slice(i, i + 50);
-    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails,statistics&id=${chunk.join(",")}&key=${env.YOUTUBE_API_KEY}`;
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,statistics&id=${chunk.join(",")}&key=${env.YOUTUBE_API_KEY}`;
     const res = await fetch(apiUrl);
     if (!res.ok) continue;
     const data = await res.json();
@@ -562,6 +564,102 @@ async function fetchVideosBatched(videoIds, env) {
     }
   }
   return videoMap;
+}
+
+// ============================================================
+// ▼ここから追加:チャンネル登録直後の初回取り込み処理 ============================================
+// 役割:チャンネルを登録した直後は、YouTube側から新しい投稿の通知(WebSub)がまだ届いていないため、
+//       このままでは「次に何か投稿されるまでトップページに何も表示されない」状態になってしまう。
+//       それを防ぐため、登録した瞬間に「直近の動画」と「現在配信中かどうか」をその場で取りに行く。
+// ============================================================
+
+const INITIAL_SYNC_VIDEO_COUNT = 10; // 登録直後に取り込む、直近の動画の件数
+
+async function syncChannelInitialContent(channelId, gameId, env) {
+  // ① チャンネルの「アップロード動画一覧」の場所を取得する(通信1回)
+  const channelDetails = await fetchChannelDetailsBatched([channelId], env);
+  const ch = channelDetails[0];
+  if (!ch) return { synced: 0 };
+
+  const uploadsPlaylistId = (ch.contentDetails.relatedPlaylists || {}).uploads;
+  if (!uploadsPlaylistId) return { synced: 0 };
+
+  // ② 直近の動画IDを取得する(通信1回)
+  const items = await fetchRecentUploadItems(uploadsPlaylistId, INITIAL_SYNC_VIDEO_COUNT, env);
+  const videoIds = items.map(it => it.videoId).filter(Boolean);
+  if (videoIds.length === 0) return { synced: 0 };
+
+  // ③ 動画の詳細情報(サムネイル・再生回数・配信中かどうかなど)をまとめて取得する(通信1回)
+  const videoMap = await fetchVideosBatched(videoIds, env);
+
+  const statements = [];
+  let syncedCount = 0;
+
+  for (const videoId of videoIds) {
+    const video = videoMap[videoId];
+    if (!video) continue;
+
+    const snippet = video.snippet || {};
+    const contentDetails = video.contentDetails || {};
+    const liveDetails = video.liveStreamingDetails || {};
+    const statistics = video.statistics || {};
+    const durationSeconds = parseIsoDuration(contentDetails.duration || "");
+    const thumbnails = snippet.thumbnails || {};
+    const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+
+    if (snippet.liveBroadcastContent === "live") {
+      // 現在配信中の動画 → live_statusに保存
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, updated_at)
+           VALUES (?, 1, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(channel_id) DO UPDATE SET
+             is_live=1, live_video_id=excluded.live_video_id, title=excluded.title,
+             thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count, updated_at=datetime('now')`
+        ).bind(channelId, videoId, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0)
+      );
+    } else {
+      // 通常の動画 → videosに保存
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'))
+           ON CONFLICT(video_id) DO UPDATE SET
+             title=excluded.title, thumbnail_url=excluded.thumbnail_url,
+             view_count=excluded.view_count, duration_seconds=excluded.duration_seconds, updated_at=datetime('now')`
+        ).bind(
+          videoId,
+          channelId,
+          gameId || "",
+          snippet.title || "",
+          thumbnail,
+          snippet.publishedAt || "",
+          Number(statistics.viewCount) || 0,
+          durationSeconds
+        )
+      );
+    }
+    syncedCount++;
+  }
+
+  // ④ まとめて1回の通信で保存する(通信1回)
+  if (statements.length > 0) {
+    await env.DB.batch(statements);
+  }
+
+  return { synced: syncedCount };
+}
+
+// アップロード動画一覧(再生リスト)から、直近の動画ID・投稿日を取得する
+async function fetchRecentUploadItems(uploadsPlaylistId, maxResults, env) {
+  const apiUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${maxResults}&playlistId=${uploadsPlaylistId}&key=${env.YOUTUBE_API_KEY}`;
+  const res = await fetch(apiUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || []).map(item => ({
+    videoId: item.snippet.resourceId ? item.snippet.resourceId.videoId : null,
+    publishedAt: item.snippet.publishedAt,
+  }));
 }
 
 // ============================================================
