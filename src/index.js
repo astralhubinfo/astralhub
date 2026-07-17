@@ -140,6 +140,101 @@ export default {
       }
     }
 
+    // 窓口7:チャンネル自動発掘を実行する(POST /api/discover)
+    // body例: { "gameId": "genshin" } ※省略した場合は全ゲームまとめて実行します
+    if (url.pathname === "/api/discover" && request.method === "POST") {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const targetGameIds = body.gameId ? [body.gameId] : Object.keys(GAME_KEYWORDS);
+        const summary = [];
+        for (const gameId of targetGameIds) {
+          const result = await discoverCandidatesForGame(gameId, env);
+          summary.push({ gameId, ...result });
+        }
+        return jsonResponse({ summary });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口8:候補チャンネル一覧を取得する(GET /api/candidates?status=pending&gameId=genshin)
+    if (url.pathname === "/api/candidates" && request.method === "GET") {
+      try {
+        const status = url.searchParams.get("status") || "pending";
+        const gameId = url.searchParams.get("gameId");
+        let query = "SELECT * FROM candidate_channels WHERE status = ?";
+        const params = [status];
+        if (gameId) {
+          query += " AND game_id = ?";
+          params.push(gameId);
+        }
+        query += " ORDER BY discovered_at DESC";
+        const { results } = await env.DB.prepare(query)
+          .bind(...params)
+          .all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口9:候補チャンネルを承認して本登録する(POST /api/candidates/:channel_id/approve)
+    if (
+      url.pathname.startsWith("/api/candidates/") &&
+      url.pathname.endsWith("/approve") &&
+      request.method === "POST"
+    ) {
+      try {
+        const channelId = decodeURIComponent(
+          url.pathname.replace("/api/candidates/", "").replace("/approve", "")
+        );
+        const candidate = await env.DB.prepare(
+          "SELECT * FROM candidate_channels WHERE channel_id = ?"
+        )
+          .bind(channelId)
+          .first();
+        if (!candidate) return jsonResponse({ error: "候補が見つかりません" }, 404);
+
+        await insertChannel(env.DB, {
+          channel_id: candidate.channel_id,
+          channel_name: candidate.channel_name,
+          url: `https://www.youtube.com/channel/${candidate.channel_id}`,
+          game: candidate.game_id,
+        });
+        await requestWebSubSubscribe(candidate.channel_id, env).catch(() => {});
+        await env.DB.prepare(
+          "UPDATE candidate_channels SET status = 'approved' WHERE channel_id = ?"
+        )
+          .bind(channelId)
+          .run();
+
+        return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口10:候補チャンネルを不採用にする(POST /api/candidates/:channel_id/reject)
+    if (
+      url.pathname.startsWith("/api/candidates/") &&
+      url.pathname.endsWith("/reject") &&
+      request.method === "POST"
+    ) {
+      try {
+        const channelId = decodeURIComponent(
+          url.pathname.replace("/api/candidates/", "").replace("/reject", "")
+        );
+        await env.DB.prepare(
+          "UPDATE candidate_channels SET status = 'rejected' WHERE channel_id = ?"
+        )
+          .bind(channelId)
+          .run();
+        return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -445,4 +540,163 @@ async function fetchVideosBatched(videoIds, env) {
     }
   }
   return videoMap;
+}
+
+// ============================================================
+// ▼ここから追加:チャンネル自動発掘(候補精査)関連の処理 ============================================
+// ============================================================
+
+// ゲームごとの検索キーワード
+// ※ assets/config.js の GAME_KEYWORDS と同じ内容にしてください(ゲームを追加した場合は両方直す)
+const GAME_KEYWORDS = {
+  genshin: ["原神", "Genshin", "げんしん"],
+  hsr: ["スターレイル", "崩壊：スターレイル", "崩壊:スターレイル", "HSR", "Honkai: Star Rail"],
+  zzz: ["ゼンレスゾーンゼロ", "ゼンゼロ", "ZZZ", "Zenless"],
+  ww: ["鳴潮", "めいちょう", "Wuthering Waves"],
+  nte: ["NTE"],
+};
+
+// 候補として残すための基準
+const CANDIDATE_MIN_SUBSCRIBERS = 100; // 登録者数がこれ未満は除外
+const CANDIDATE_MIN_RELEVANCE = 0.3; // 直近動画のうち、このゲームの動画の割合がこれ未満は除外
+const CANDIDATE_ACTIVITY_DAYS = 30; // この日数以内にそのゲームの動画がなければ除外
+const CANDIDATE_CHECK_VIDEO_COUNT = 20; // 関連度を調べるとき、直近何件の動画をチェックするか
+
+// 1つのゲームについて、候補チャンネルを検索→精査→保存する
+async function discoverCandidatesForGame(gameId, env) {
+  const keywords = GAME_KEYWORDS[gameId];
+  if (!keywords) {
+    throw new Error(`gameId「${gameId}」のキーワードが見つかりません`);
+  }
+
+  const publishedAfter = new Date(
+    Date.now() - CANDIDATE_ACTIVITY_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  // ① キーワードごとに直近1ヶ月の動画を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める
+  const foundChannels = new Map(); // channelId -> { lastRelatedVideoAt }
+  for (const keyword of keywords) {
+    const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env);
+    for (const item of items) {
+      const channelId = item.snippet.channelId;
+      const publishedAt = item.snippet.publishedAt;
+      const existing = foundChannels.get(channelId);
+      if (!existing || publishedAt > existing.lastRelatedVideoAt) {
+        foundChannels.set(channelId, { lastRelatedVideoAt: publishedAt });
+      }
+    }
+  }
+
+  if (foundChannels.size === 0) {
+    return { found: 0, added: 0 };
+  }
+
+  // ② すでに本登録済み・すでに候補になっているチャンネルは除外する
+  const existingIds = await getExistingChannelIds(env);
+  const newChannelIds = [...foundChannels.keys()].filter(id => !existingIds.has(id));
+
+  if (newChannelIds.length === 0) {
+    return { found: foundChannels.size, added: 0 };
+  }
+
+  // ③ チャンネルの詳細情報(登録者数など)をまとめて取得し、登録者数でふるいにかける
+  const channelDetails = await fetchChannelDetailsBatched(newChannelIds, env);
+  const bySubscribers = channelDetails.filter(
+    ch => (Number(ch.statistics.subscriberCount) || 0) >= CANDIDATE_MIN_SUBSCRIBERS
+  );
+
+  // ④ 残ったチャンネルについて、直近の投稿を調べて「関連度」を計算する
+  let addedCount = 0;
+  for (const ch of bySubscribers) {
+    const uploadsPlaylistId = (ch.contentDetails.relatedPlaylists || {}).uploads;
+    if (!uploadsPlaylistId) continue;
+
+    const recentTitles = await fetchRecentUploadTitles(
+      uploadsPlaylistId,
+      CANDIDATE_CHECK_VIDEO_COUNT,
+      env
+    );
+    if (recentTitles.length === 0) continue;
+
+    const relatedCount = recentTitles.filter(t => matchesAnyKeyword(t, keywords)).length;
+    const relevanceScore = relatedCount / recentTitles.length;
+
+    if (relevanceScore < CANDIDATE_MIN_RELEVANCE) continue;
+
+    const thumbnails = ch.snippet.thumbnails || {};
+    const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+    const lastRelatedVideoAt = foundChannels.get(ch.id).lastRelatedVideoAt;
+
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO candidate_channels
+        (channel_id, channel_name, game_id, subscriber_count, relevance_score, last_related_video_at, thumbnail_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        ch.id,
+        ch.snippet.title || "",
+        gameId,
+        Number(ch.statistics.subscriberCount) || 0,
+        relevanceScore,
+        lastRelatedVideoAt,
+        thumbnail
+      )
+      .run();
+
+    addedCount++;
+  }
+
+  return { found: foundChannels.size, added: addedCount };
+}
+
+// すでに「本登録済み」または「候補として保存済み」のチャンネルIDを集める(重複を避けるため)
+async function getExistingChannelIds(env) {
+  const registered = await env.DB.prepare("SELECT channel_id FROM channels").all();
+  const candidates = await env.DB.prepare("SELECT channel_id FROM candidate_channels").all();
+  const ids = new Set();
+  for (const row of registered.results) ids.add(row.channel_id);
+  for (const row of candidates.results) ids.add(row.channel_id);
+  return ids;
+}
+
+// キーワードで、直近の動画を検索する(YouTube search API)
+async function searchRecentVideosByKeyword(keyword, publishedAfter, env) {
+  const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=50&publishedAfter=${encodeURIComponent(
+    publishedAfter
+  )}&q=${encodeURIComponent(keyword)}&key=${env.YOUTUBE_API_KEY}`;
+  const res = await fetch(apiUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.items || [];
+}
+
+// チャンネルIDの配列から、詳細情報(登録者数・アップロード一覧の場所など)をまとめて取得する
+async function fetchChannelDetailsBatched(channelIds, env) {
+  const details = [];
+  for (let i = 0; i < channelIds.length; i += 50) {
+    const chunk = channelIds.slice(i, i + 50);
+    const apiUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${chunk.join(
+      ","
+    )}&key=${env.YOUTUBE_API_KEY}`;
+    const res = await fetch(apiUrl);
+    if (!res.ok) continue;
+    const data = await res.json();
+    details.push(...(data.items || []));
+  }
+  return details;
+}
+
+// アップロード動画一覧(再生リスト)から、直近の動画タイトルを取得する
+async function fetchRecentUploadTitles(uploadsPlaylistId, maxResults, env) {
+  const apiUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${maxResults}&playlistId=${uploadsPlaylistId}&key=${env.YOUTUBE_API_KEY}`;
+  const res = await fetch(apiUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || []).map(item => item.snippet.title || "");
+}
+
+// タイトルが、指定したキーワードのどれかを含んでいるか判定する
+function matchesAnyKeyword(title, keywords) {
+  const lowerTitle = title.toLowerCase();
+  return keywords.some(kw => lowerTitle.includes(kw.toLowerCase()));
 }
