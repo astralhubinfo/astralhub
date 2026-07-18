@@ -354,6 +354,12 @@ async function requestWebSubUnsubscribe(channelId, env) {
 
 async function sendWebSubRequest(channelId, env, mode) {
   if (!channelId) return;
+
+  if (!env.SITE_URL) {
+    console.error("[AstralHub][WebSub] env.SITE_URLが設定されていないため、通知の予約ができません");
+    return;
+  }
+
   const callbackUrl = `${env.SITE_URL}/websub/callback`;
   const topicUrl = `https://www.youtube.com/xml/feeds/videos.xml?channel_id=${channelId}`;
 
@@ -364,11 +370,22 @@ async function sendWebSubRequest(channelId, env, mode) {
     "hub.verify": "async",
   });
 
-  await fetch("https://pubsubhubbub.appspot.com/subscribe", {
+  const res = await fetch("https://pubsubhubbub.appspot.com/subscribe", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: formBody.toString(),
   });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error(
+      `[AstralHub][WebSub] ${mode}リクエストがハブ側で失敗しました status=${res.status} channelId=${channelId} callbackUrl=${callbackUrl} response=${text}`
+    );
+  } else {
+    console.log(
+      `[AstralHub][WebSub] ${mode}リクエストをハブに送信しました channelId=${channelId} callbackUrl=${callbackUrl}`
+    );
+  }
 }
 
 async function handleWebSubVerify(request, env) {
@@ -378,12 +395,16 @@ async function handleWebSubVerify(request, env) {
   const challenge = url.searchParams.get("hub.challenge");
   const leaseSeconds = url.searchParams.get("hub.lease_seconds");
 
+  console.log(`[AstralHub][WebSub] 確認リクエストを受信しました mode=${mode} topic=${topic}`);
+
   if (!mode || !topic || !challenge) {
+    console.error("[AstralHub][WebSub] 確認リクエストのパラメータが不足しています", url.toString());
     return new Response("Bad Request", { status: 400 });
   }
 
   const channelId = extractChannelIdFromTopic(topic);
   if (!channelId) {
+    console.error("[AstralHub][WebSub] topicからチャンネルIDを抽出できませんでした", topic);
     return new Response("Bad Request", { status: 400 });
   }
 
@@ -393,6 +414,7 @@ async function handleWebSubVerify(request, env) {
     .bind(channelId)
     .first();
   if (!channelRow) {
+    console.error("[AstralHub][WebSub] 登録されていないチャンネルからの確認リクエストです", channelId);
     return new Response("Not Found", { status: 404 });
   }
 
