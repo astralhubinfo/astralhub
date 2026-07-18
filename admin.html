@@ -293,6 +293,43 @@ async function handleResyncMissingChannels(){
     btn.textContent = '動画が0件のチャンネルを再同期する';
   }
 }
+
+// 既存の動画データを、箱が空になるまで少しずつ新しい基準で洗い直す
+// (ゲーム判定・ショート動画/アーカイブ除外の仕組みを追加する前に保存された古いデータが対象)
+async function apiRescreenVideosBatch(){
+  const res = await fetch('/api/videos/rescreen-batch', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '洗い直しに失敗しました');
+  }
+  return res.json();
+}
+
+async function handleRescreenVideos(){
+  const btn = document.getElementById('rescreenVideosBtn');
+  btn.disabled = true;
+
+  try {
+    let totalUpdated = 0;
+    let totalRemoved = 0;
+    let remaining = 1;
+    while (remaining > 0) {
+      btn.textContent = `洗い直し中…（残り約${remaining}件）`;
+      const r = await apiRescreenVideosBatch();
+      totalUpdated += r.updated || 0;
+      totalRemoved += r.removed || 0;
+      remaining = r.remaining || 0;
+      if (!r.processed) break; // 念のための安全装置(無限ループ防止)
+    }
+    showToast(`洗い直し完了：${totalUpdated}件を更新、${totalRemoved}件を除外しました`);
+  } catch (e) {
+    console.error('[AstralHub] 洗い直しに失敗しました', e);
+    showToast(e.message || '洗い直しに失敗しました');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '既存の動画を新しい基準で洗い直す';
+  }
+}
 // ▲ここまで追加 ============================================
 
 function showToast(msg){
@@ -418,12 +455,23 @@ async function renderTabContent(){
       </p>
       <button class="submit-btn" id="resyncMissingBtn">動画が0件のチャンネルを再同期する</button>
     </div>
+    <div class="panel">
+      <h2>既存の動画を新しい基準で洗い直す</h2>
+      <p class="hint">
+        「ゲームの自動判定・タグ切り替え」「ショート動画の除外」「配信アーカイブの除外」の仕組みを
+        追加する前に保存された、古い動画データを対象に見直します。
+        タイトルからゲームを判定し直し、ショート動画・配信アーカイブ・判定不可のものは一覧から取り除きます。
+        すでに見直し済みの動画は対象外なので、何度押しても問題ありません(件数が多い場合は、何回かに分けて実行してください)。
+      </p>
+      <button class="submit-btn" id="rescreenVideosBtn">既存の動画を新しい基準で洗い直す</button>
+    </div>
   ` : '';
 
   document.getElementById('tabContent').innerHTML = formHtml + tableHtml + resyncPanelHtml;
 
   if (activeType === 'manualChannels') {
     document.getElementById('resyncMissingBtn').addEventListener('click', handleResyncMissingChannels);
+    document.getElementById('rescreenVideosBtn').addEventListener('click', handleRescreenVideos);
   }
 
   // 編集モードの場合、フォームに既存の値を入れておく

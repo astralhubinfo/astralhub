@@ -70,7 +70,29 @@ export default {
       }
     }
 
-    // （旧・窓口3「チャンネルをまとめて登録するAPI」は削除済み。チャンネル発掘・チャンネル登録（手動）で運用をカバーしています）
+    // 窓口3:チャンネルをまとめて登録する(POST /api/channels/bulk)
+    if (url.pathname === "/api/channels/bulk" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const list = body.channels || [];
+        const inserted = [];
+        const skipped = [];
+
+        for (const ch of list) {
+          try {
+            await insertChannel(env.DB, ch);
+            inserted.push(ch.channel_id);
+            await requestWebSubSubscribe(ch.channel_id, env).catch(() => {});
+          } catch (err) {
+            skipped.push({ channel_id: ch.channel_id, reason: err.message });
+          }
+        }
+
+        return jsonResponse({ inserted, skipped });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 400);
+      }
+    }
 
     // 窓口4:チャンネルを削除する(DELETE /api/channels/:channel_id)
     if (url.pathname.startsWith("/api/channels/") && request.method === "DELETE") {
@@ -91,7 +113,7 @@ export default {
       try {
         const { results } = await env.DB.prepare(
           `SELECT ls.channel_id, ls.live_video_id, ls.title, ls.thumbnail_url, ls.viewer_count,
-                  c.game, c.channel_name
+                  COALESCE(NULLIF(ls.game, ''), c.game) AS game, c.channel_name
            FROM live_status ls
            JOIN channels c ON c.channel_id = ls.channel_id
            WHERE ls.is_live = 1
@@ -258,6 +280,19 @@ export default {
       }
     }
 
+    // 窓口14:既存の動画データを、少しずつ新しい基準(ゲーム判定・ショート/アーカイブ除外)で洗い直す
+    // (POST /api/videos/rescreen-batch)
+    // ※ゲーム判定・ショート動画/アーカイブ除外の仕組みを追加する前に保存された、古い動画データを
+    //   今の基準で洗い直すための窓口。箱が空になるまで、admin.html側からこの窓口を繰り返し呼び出します。
+    if (url.pathname === "/api/videos/rescreen-batch" && request.method === "POST") {
+      try {
+        const result = await rescreenExistingVideosBatch(env);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -392,13 +427,13 @@ async function handleWebSubNotification(request, env) {
     if (!videoId || !channelId) continue;
 
     const channelRow = await env.DB.prepare(
-      "SELECT game FROM channels WHERE channel_id = ?"
+      "SELECT channel_id FROM channels WHERE channel_id = ?"
     )
       .bind(channelId)
       .first();
     if (!channelRow) continue;
 
-    await fetchAndStoreVideo(videoId, channelId, channelRow.game, env);
+    await fetchAndStoreVideo(videoId, channelId, env);
   }
 
   return new Response("OK", { status: 200 });
@@ -420,7 +455,7 @@ function extractChannelIdFromTopic(topic) {
   return match ? match[1] : null;
 }
 
-async function fetchAndStoreVideo(videoId, channelId, game, env) {
+async function fetchAndStoreVideo(videoId, channelId, env) {
   const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails,statistics&id=${videoId}&key=${env.YOUTUBE_API_KEY}`;
   const res = await fetch(apiUrl);
   if (!res.ok) return;
@@ -428,43 +463,46 @@ async function fetchAndStoreVideo(videoId, channelId, game, env) {
   const video = data.items && data.items[0];
   if (!video) return;
 
+  const action = resolveVideoAction(video);
+  if (!action.save) return; // ショート動画・配信アーカイブ・ゲーム判定不可のいずれかのため保存しない
+
   const snippet = video.snippet || {};
-  const contentDetails = video.contentDetails || {};
   const liveDetails = video.liveStreamingDetails || {};
   const statistics = video.statistics || {};
-  const durationSeconds = parseIsoDuration(contentDetails.duration || "");
   const thumbnails = snippet.thumbnails || {};
   const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
 
-  if (snippet.liveBroadcastContent === "live") {
+  if (action.kind === "live") {
     await env.DB.prepare(
-      `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, updated_at)
-       VALUES (?, 1, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, game, updated_at)
+       VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(channel_id) DO UPDATE SET
          is_live=1, live_video_id=excluded.live_video_id, title=excluded.title,
-         thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count, updated_at=datetime('now')`
+         thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count,
+         game=excluded.game, updated_at=datetime('now')`
     )
-      .bind(channelId, videoId, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0)
+      .bind(channelId, videoId, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0, action.gameId)
       .run();
     return;
   }
 
   await env.DB.prepare(
-    `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'))
+    `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, rescreened_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'), datetime('now'))
      ON CONFLICT(video_id) DO UPDATE SET
-       title=excluded.title, thumbnail_url=excluded.thumbnail_url,
-       view_count=excluded.view_count, duration_seconds=excluded.duration_seconds, updated_at=datetime('now')`
+       game=excluded.game, title=excluded.title, thumbnail_url=excluded.thumbnail_url,
+       view_count=excluded.view_count, duration_seconds=excluded.duration_seconds,
+       rescreened_at=datetime('now'), updated_at=datetime('now')`
   )
     .bind(
       videoId,
       channelId,
-      game || "",
+      action.gameId,
       snippet.title || "",
       thumbnail,
       snippet.publishedAt || "",
       Number(statistics.viewCount) || 0,
-      durationSeconds
+      action.durationSeconds
     )
     .run();
 }
@@ -476,6 +514,71 @@ function parseIsoDuration(iso) {
   const minutes = Number(match[2] || 0);
   const seconds = Number(match[3] || 0);
   return hours * 3600 + minutes * 60 + seconds;
+}
+
+// ============================================================
+// ▼ここから追加:動画・配信の内容精査(ゲーム判定・ショート動画/アーカイブ除外) ============================================
+// 役割:
+//   ①タイトルから実際にプレイ・紹介されているゲームを判定し、登録チャンネルのゲームと違っていても
+//     正しいゲームのタグに切り替える。どのゲームか判定できない内容(雑談動画など)は保存しない。
+//   ②ショート動画(60秒以内、または #shorts #ショート などのハッシュタグが付いた動画)を除外する。
+//   ③配信が終わったあとの「アーカイブ動画」・配信予定(プレミア公開待ちなど)は、
+//     動画一覧には出さない(LIVE中の間だけ表示する)。
+// ============================================================
+
+const SHORT_VIDEO_MAX_SECONDS = 60; // これ以下の長さは、ショート動画とみなして除外する
+
+// タイトル・概要欄に、ショート動画を示すハッシュタグが含まれているか判定する
+function hasShortsHashtag(snippet) {
+  const text = `${snippet.title || ""} ${snippet.description || ""}`;
+  if (/#shorts?(?=\s|$|[^a-z0-9])/i.test(text)) return true;
+  if (text.includes("#ショート")) return true;
+  return false;
+}
+
+// 動画の長さ・ハッシュタグから、ショート動画かどうかを判定する
+function isShortVideo(snippet, durationSeconds) {
+  if (durationSeconds > 0 && durationSeconds <= SHORT_VIDEO_MAX_SECONDS) return true;
+  return hasShortsHashtag(snippet);
+}
+
+// タイトルから、実際にプレイ・紹介されているゲームを判定する(該当なしはnullを返す)
+function classifyGameIdForItem(title) {
+  if (!title) return null;
+  for (const gameId of Object.keys(GAME_KEYWORDS)) {
+    if (matchesAnyKeyword(title, GAME_KEYWORDS[gameId])) {
+      return gameId;
+    }
+  }
+  return null;
+}
+
+// 動画・配信1件分の情報から、「保存すべきか」「保存する場合は配信か動画か・どのゲームか」を判定する
+// 戻り値: { save: false } または { save: true, kind: 'live'|'video', gameId, durationSeconds }
+function resolveVideoAction(video) {
+  const snippet = video.snippet || {};
+  const contentDetails = video.contentDetails || {};
+  const durationSeconds = parseIsoDuration(contentDetails.duration || "");
+  const isCurrentlyLive = snippet.liveBroadcastContent === "live";
+  const isLiveRelated = !!video.liveStreamingDetails; // 配信中・配信予定・配信アーカイブのいずれか
+
+  // 配信が終わった後のアーカイブ・配信予定のものは、動画一覧には出さない
+  if (isLiveRelated && !isCurrentlyLive) {
+    return { save: false };
+  }
+
+  // ショート動画は除外する(配信中のものは対象外)
+  if (!isCurrentlyLive && isShortVideo(snippet, durationSeconds)) {
+    return { save: false };
+  }
+
+  // タイトルから実際のゲームを判定する。判定できなければ除外する
+  const gameId = classifyGameIdForItem(snippet.title || "");
+  if (!gameId) {
+    return { save: false };
+  }
+
+  return { save: true, kind: isCurrentlyLive ? "live" : "video", gameId, durationSeconds };
 }
 
 // ============================================================
@@ -517,15 +620,26 @@ async function refreshLiveChannels(env) {
     }
     const snippet = video.snippet || {};
     if (snippet.liveBroadcastContent === "live") {
-      // まだLIVE中 → 視聴者数だけ更新
+      // まだLIVE中 → 視聴者数と、タイトルから判定したゲームタグを更新する
+      // (配信中にタイトルを変えて別のゲームに切り替えた場合も、ここで自動的に反映されます)
       const viewerCount = Number((video.liveStreamingDetails || {}).concurrentViewers) || 0;
-      await env.DB.prepare(
-        "UPDATE live_status SET viewer_count = ?, updated_at = datetime('now') WHERE channel_id = ?"
-      )
-        .bind(viewerCount, row.channel_id)
-        .run();
+      const gameId = classifyGameIdForItem(snippet.title || "");
+      if (gameId) {
+        await env.DB.prepare(
+          "UPDATE live_status SET viewer_count = ?, game = ?, updated_at = datetime('now') WHERE channel_id = ?"
+        )
+          .bind(viewerCount, gameId, row.channel_id)
+          .run();
+      } else {
+        // タイトルからゲームを判定できなかった場合は、タグは変えずに視聴者数だけ更新する
+        await env.DB.prepare(
+          "UPDATE live_status SET viewer_count = ?, updated_at = datetime('now') WHERE channel_id = ?"
+        )
+          .bind(viewerCount, row.channel_id)
+          .run();
+      }
     } else {
-      // LIVEが終了した → is_liveを0にする(動画・アーカイブとしての保存はwebsub通知側で行われます)
+      // LIVEが終了した → is_liveを0にする(アーカイブは動画一覧には保存しません)
       await env.DB.prepare("UPDATE live_status SET is_live = 0 WHERE channel_id = ?")
         .bind(row.channel_id)
         .run();
@@ -620,6 +734,7 @@ async function resyncMissingChannelsBatch(env) {
 }
 
 async function syncChannelInitialContent(channelId, gameId, env) {
+  // ※gameId引数は互換性のために残していますが、実際に保存するゲームはタイトルから判定するため使用しません
   // ① チャンネルの「アップロード動画一覧」の場所を取得する(通信1回)
   const channelDetails = await fetchChannelDetailsBatched([channelId], env);
   const ch = channelDetails[0];
@@ -643,43 +758,46 @@ async function syncChannelInitialContent(channelId, gameId, env) {
     const video = videoMap[videoId];
     if (!video) continue;
 
+    const action = resolveVideoAction(video);
+    if (!action.save) continue; // ショート動画・配信アーカイブ・ゲーム判定不可のいずれかのため取り込まない
+
     const snippet = video.snippet || {};
-    const contentDetails = video.contentDetails || {};
     const liveDetails = video.liveStreamingDetails || {};
     const statistics = video.statistics || {};
-    const durationSeconds = parseIsoDuration(contentDetails.duration || "");
     const thumbnails = snippet.thumbnails || {};
     const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
 
-    if (snippet.liveBroadcastContent === "live") {
+    if (action.kind === "live") {
       // 現在配信中の動画 → live_statusに保存
       statements.push(
         env.DB.prepare(
-          `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, updated_at)
-           VALUES (?, 1, ?, ?, ?, ?, datetime('now'))
+          `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, game, updated_at)
+           VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT(channel_id) DO UPDATE SET
              is_live=1, live_video_id=excluded.live_video_id, title=excluded.title,
-             thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count, updated_at=datetime('now')`
-        ).bind(channelId, videoId, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0)
+             thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count,
+             game=excluded.game, updated_at=datetime('now')`
+        ).bind(channelId, videoId, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0, action.gameId)
       );
     } else {
       // 通常の動画 → videosに保存
       statements.push(
         env.DB.prepare(
-          `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'))
+          `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, rescreened_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'video', ?, ?, ?, datetime('now'), datetime('now'))
            ON CONFLICT(video_id) DO UPDATE SET
-             title=excluded.title, thumbnail_url=excluded.thumbnail_url,
-             view_count=excluded.view_count, duration_seconds=excluded.duration_seconds, updated_at=datetime('now')`
+             game=excluded.game, title=excluded.title, thumbnail_url=excluded.thumbnail_url,
+             view_count=excluded.view_count, duration_seconds=excluded.duration_seconds,
+             rescreened_at=datetime('now'), updated_at=datetime('now')`
         ).bind(
           videoId,
           channelId,
-          gameId || "",
+          action.gameId,
           snippet.title || "",
           thumbnail,
           snippet.publishedAt || "",
           Number(statistics.viewCount) || 0,
-          durationSeconds
+          action.durationSeconds
         )
       );
     }
@@ -704,6 +822,84 @@ async function fetchRecentUploadItems(uploadsPlaylistId, maxResults, env) {
     videoId: item.snippet.resourceId ? item.snippet.resourceId.videoId : null,
     publishedAt: item.snippet.publishedAt,
   }));
+}
+
+// ============================================================
+// ▼ここから追加:既存の動画データの洗い直し処理 ============================================
+// 役割:ゲーム判定・ショート動画/アーカイブ除外の仕組みを追加する前に保存された、古い動画データを対象に、
+//       YouTubeから最新の情報を取り直しつつ、今の基準(resolveVideoAction)で1件ずつ判定し直す。
+//       ・今の基準でも問題ない → gameタグだけ最新の判定結果に更新する
+//       ・ショート動画/アーカイブ/ゲーム判定不可/動画自体が削除済み → 一覧から取り除く(削除する)
+// ※ videosテーブルの rescreened_at 列(見直し済みかどうかの目印)がまだ空の行だけを対象にするため、
+//   何度実行しても、一度見直した動画を重複して処理することはありません。
+// ============================================================
+
+const RESCREEN_VIDEOS_BATCH_SIZE = 50; // YouTube動画情報取得APIの上限(1回50件)に合わせた件数
+
+async function rescreenExistingVideosBatch(env) {
+  // ① 見直しがまだ済んでいない動画を、投稿日が古い順に規定件数だけ取り出す(通信1回)
+  const { results: batch } = await env.DB.prepare(
+    `SELECT video_id FROM videos WHERE rescreened_at IS NULL ORDER BY published_at ASC LIMIT ?`
+  )
+    .bind(RESCREEN_VIDEOS_BATCH_SIZE)
+    .all();
+
+  if (batch.length === 0) {
+    return { processed: 0, updated: 0, removed: 0, remaining: 0 };
+  }
+
+  // ② 取り出した動画の最新情報を、まとめて1回の通信で取得し直す(通信1回、最大50件まで対応)
+  const videoIds = batch.map(row => row.video_id);
+  const videoMap = await fetchVideosBatched(videoIds, env);
+
+  const updateStatements = [];
+  const deleteIds = [];
+  let updatedCount = 0;
+
+  for (const videoId of videoIds) {
+    const video = videoMap[videoId];
+    if (!video) {
+      // YouTube側ですでに削除・非公開になっている動画 → 一覧から取り除く
+      deleteIds.push(videoId);
+      continue;
+    }
+
+    const action = resolveVideoAction(video);
+    if (!action.save || action.kind !== "video") {
+      // ショート動画・配信アーカイブ・配信予定・ゲーム判定不可のいずれか → 一覧から取り除く
+      deleteIds.push(videoId);
+      continue;
+    }
+
+    // 今の基準でも問題なし → ゲームタグを最新の判定結果に更新し、見直し済みの印を付ける
+    updateStatements.push(
+      env.DB.prepare(
+        "UPDATE videos SET game = ?, rescreened_at = datetime('now') WHERE video_id = ?"
+      ).bind(action.gameId, videoId)
+    );
+    updatedCount++;
+  }
+
+  // ③ 判定結果を、まとめて1回の通信で反映する(通信1回)
+  const allStatements = [...updateStatements];
+  if (deleteIds.length > 0) {
+    allStatements.push(
+      env.DB.prepare(
+        `DELETE FROM videos WHERE video_id IN (${deleteIds.map(() => "?").join(",")})`
+      ).bind(...deleteIds)
+    );
+  }
+  if (allStatements.length > 0) {
+    await env.DB.batch(allStatements);
+  }
+
+  // ④ まだ見直しが必要な件数を確認する(通信1回)
+  const { results: remainRows } = await env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM videos WHERE rescreened_at IS NULL"
+  ).all();
+  const remaining = remainRows[0] ? remainRows[0].cnt : 0;
+
+  return { processed: batch.length, updated: updatedCount, removed: deleteIds.length, remaining };
 }
 
 // ============================================================
