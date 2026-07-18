@@ -70,29 +70,7 @@ export default {
       }
     }
 
-    // 窓口3:チャンネルをまとめて登録する(POST /api/channels/bulk)
-    if (url.pathname === "/api/channels/bulk" && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const list = body.channels || [];
-        const inserted = [];
-        const skipped = [];
-
-        for (const ch of list) {
-          try {
-            await insertChannel(env.DB, ch);
-            inserted.push(ch.channel_id);
-            await requestWebSubSubscribe(ch.channel_id, env).catch(() => {});
-          } catch (err) {
-            skipped.push({ channel_id: ch.channel_id, reason: err.message });
-          }
-        }
-
-        return jsonResponse({ inserted, skipped });
-      } catch (err) {
-        return jsonResponse({ error: err.message }, 400);
-      }
-    }
+    // （旧・窓口3「チャンネルをまとめて登録するAPI」は削除済み。チャンネル発掘・チャンネル登録（手動）で運用をカバーしています）
 
     // 窓口4:チャンネルを削除する(DELETE /api/channels/:channel_id)
     if (url.pathname.startsWith("/api/channels/") && request.method === "DELETE") {
