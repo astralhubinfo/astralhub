@@ -330,6 +330,40 @@ async function handleRescreenVideos(){
     btn.textContent = '既存の動画を新しい基準で洗い直す';
   }
 }
+
+// 通知予約(WebSub)が未確認・期限切れのチャンネルを、箱が空になるまで少しずつ予約し直す
+async function apiResubscribeMissingBatch(){
+  const res = await fetch('/api/channels/resubscribe-batch', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '通知予約のやり直しに失敗しました');
+  }
+  return res.json();
+}
+
+async function handleResubscribeMissingChannels(){
+  const btn = document.getElementById('resubscribeMissingBtn');
+  btn.disabled = true;
+
+  try {
+    let totalProcessed = 0;
+    let remaining = 1;
+    while (remaining > 0) {
+      btn.textContent = `予約し直し中…（残り約${remaining}件）`;
+      const r = await apiResubscribeMissingBatch();
+      totalProcessed += r.processed || 0;
+      remaining = r.remaining || 0;
+      if (!r.processed) break; // 念のための安全装置(無限ループ防止)
+    }
+    showToast(`予約リクエスト送信完了：${totalProcessed}件（確認が返ってくるまで少し時間がかかります）`);
+  } catch (e) {
+    console.error('[AstralHub] 通知予約のやり直しに失敗しました', e);
+    showToast(e.message || '通知予約のやり直しに失敗しました');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '通知予約(WebSub)が済んでいないチャンネルを予約し直す';
+  }
+}
 // ▲ここまで追加 ============================================
 
 function showToast(msg){
@@ -465,6 +499,16 @@ async function renderTabContent(){
       </p>
       <button class="submit-btn" id="rescreenVideosBtn">既存の動画を新しい基準で洗い直す</button>
     </div>
+    <div class="panel">
+      <h2>通知予約(WebSub)が済んでいないチャンネルを予約し直す</h2>
+      <p class="hint">
+        YouTube側に「新しい投稿・配信開始があったら教えてください」とお願いする予約が、
+        まだ済んでいない・期限切れになっているチャンネルだけを対象に、予約をお願いし直します。
+        押した直後はまだ「お願いした」段階で、YouTube側からの確認が返ってくるまで少し時間がかかります。
+        すでに予約が済んでいるチャンネルは対象外なので、何度押しても問題ありません。
+      </p>
+      <button class="submit-btn" id="resubscribeMissingBtn">通知予約(WebSub)が済んでいないチャンネルを予約し直す</button>
+    </div>
   ` : '';
 
   document.getElementById('tabContent').innerHTML = formHtml + tableHtml + resyncPanelHtml;
@@ -472,6 +516,7 @@ async function renderTabContent(){
   if (activeType === 'manualChannels') {
     document.getElementById('resyncMissingBtn').addEventListener('click', handleResyncMissingChannels);
     document.getElementById('rescreenVideosBtn').addEventListener('click', handleRescreenVideos);
+    document.getElementById('resubscribeMissingBtn').addEventListener('click', handleResubscribeMissingChannels);
   }
 
   // 編集モードの場合、フォームに既存の値を入れておく

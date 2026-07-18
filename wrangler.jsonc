@@ -2,6 +2,9 @@
   "name": "astralhub",
   "main": "src/index.js",
   "compatibility_date": "2026-07-15",
+  "vars": {
+    "SITE_URL": "https://astralhub.freegateid.workers.dev"
+  },
   "assets": {
     "directory": ".",
     "binding": "ASSETS",

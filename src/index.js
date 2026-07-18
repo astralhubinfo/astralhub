@@ -293,6 +293,19 @@ export default {
       }
     }
 
+    // 窓口15:通知予約(WebSub)が済んでいない・切れているチャンネルを、少しずつ予約し直す
+    // (POST /api/channels/resubscribe-batch)
+    // ※SITE_URLの設定漏れなどが原因で、通知予約が一度もできていなかったチャンネルを
+    //   まとめて復旧するための窓口。箱が空になるまで、admin.html側からこの窓口を繰り返し呼び出します。
+    if (url.pathname === "/api/channels/resubscribe-batch" && request.method === "POST") {
+      try {
+        const result = await resubscribeMissingChannelsBatch(env);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -705,6 +718,50 @@ async function fetchVideosBatched(videoIds, env) {
     }
   }
   return videoMap;
+}
+
+// ============================================================
+// ▼ここから追加:通知予約(WebSub)のやり直し処理 ============================================
+// 役割:SITE_URLの設定漏れなどが原因で、通知予約(YouTube側への「新しい投稿があったら教えてください」の
+//       申し込み)が一度もできていなかった・期限切れのままになっているチャンネルを、少しずつ予約し直す。
+// ※このボタンを押した直後は、まだ「予約をお願いした」段階です。YouTube側からの確認が返ってくるまで
+//   数秒〜数分ほどかかります。確認が取れたかどうかは、少し時間を置いてから
+//   「チャンネル管理」タブなどで確認してください。
+// ============================================================
+
+const RESUBSCRIBE_BATCH_SIZE = 30; // 1回の処理で扱うチャンネル数(通信回数の上限を超えないための設定)
+
+async function resubscribeMissingChannelsBatch(env) {
+  // ① 通知予約が未確認、または期限切れのチャンネルを、規定件数だけ取り出す(通信1回)
+  const { results: batch } = await env.DB.prepare(
+    `SELECT c.channel_id FROM channels c
+     LEFT JOIN websub_subscriptions w ON w.channel_id = c.channel_id
+     WHERE w.channel_id IS NULL OR w.expires_at < datetime('now')
+     LIMIT ?`
+  )
+    .bind(RESUBSCRIBE_BATCH_SIZE)
+    .all();
+
+  if (batch.length === 0) {
+    return { processed: 0, remaining: 0 };
+  }
+
+  // ② 1件ずつ、通知予約のお願いを送る(通信は該当件数分)
+  for (const row of batch) {
+    await requestWebSubSubscribe(row.channel_id, env).catch(err =>
+      console.error("[AstralHub] 通知予約のやり直しに失敗しました", row.channel_id, err)
+    );
+  }
+
+  // ③ まだ予約し直す必要がある件数を確認する(通信1回)
+  const { results: remainRows } = await env.DB.prepare(
+    `SELECT COUNT(*) as cnt FROM channels c
+     LEFT JOIN websub_subscriptions w ON w.channel_id = c.channel_id
+     WHERE w.channel_id IS NULL OR w.expires_at < datetime('now')`
+  ).all();
+  const remaining = remainRows[0] ? remainRows[0].cnt : 0;
+
+  return { processed: batch.length, remaining };
 }
 
 // ============================================================
