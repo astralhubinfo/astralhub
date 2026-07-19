@@ -46,6 +46,13 @@
   .site-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top:0; z-index: 20; }
   .header-inner { max-width: 1240px; margin: 0 auto; padding: 12px 20px; display:flex; align-items:center; gap: 20px; }
   .logo img { height: 40px; }
+  .icon-btn {
+    border: 1px solid var(--border); background: var(--bg);
+    border-radius: var(--radius-md); width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary); font-size: 15px;
+  }
+  .icon-btn:hover { background: var(--surface-strong); }
   .back-link { margin-left:auto; font-size: 13px; font-weight: 500; color: var(--accent); }
   .back-link:hover { color: var(--accent-strong); }
 
@@ -71,6 +78,27 @@
   .pill-tabs { display:flex; gap:6px; margin-bottom: 16px; }
   .pill-tab { border:1px solid var(--border); background: var(--bg); border-radius: var(--radius-md); padding: 6px 12px; font-size: 12.5px; font-weight:500; color: var(--text-secondary); }
   .pill-tab.active { background: var(--accent); border-color: var(--accent); color:#fff; font-weight:700; }
+
+  .search-form { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 14px; }
+  .search-select, .search-input {
+    border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg);
+    font-size: 13px; font-family: inherit; color: var(--text); padding: 8px 12px;
+  }
+  .search-input { flex: 1; min-width: 200px; }
+  .search-btn {
+    border: none; border-radius: var(--radius-md); background: var(--accent); color: #fff;
+    font-size: 13px; font-weight: 700; padding: 8px 18px;
+  }
+  .search-btn:hover { background: var(--accent-strong); }
+
+  .pagination { display:flex; align-items:center; justify-content:center; gap:14px; margin: 24px 0 8px; }
+  .page-btn {
+    border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius-md);
+    padding: 8px 16px; font-size: 12.5px; font-weight: 700; color: var(--text-secondary);
+  }
+  .page-btn:hover:not(:disabled) { background: var(--surface-strong); color: var(--text); }
+  .page-btn:disabled { opacity: 0.35; cursor: default; }
+  .page-indicator { font-family: var(--font-mono); font-size: 12px; color: var(--text-faint); }
 
   .card-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 16px; }
   .media-card { min-width: 0; }
@@ -121,6 +149,7 @@
 <header class="site-header">
   <div class="header-inner">
     <a class="logo" href="index.html"><img src="assets/logo.svg" alt="AstralHub"></a>
+    <a class="icon-btn" href="list.html?type=search" title="動画を検索" aria-label="動画を検索">🔍</a>
     <a class="back-link" href="index.html">← トップに戻る</a>
   </div>
   <div class="filter-bar-wrap">
@@ -158,6 +187,7 @@ const TITLES = {
   official: '公式チャンネル 一覧',
   latest: '新着動画 一覧',
   news: '最新ニュース 一覧',
+  search: '動画検索',
 };
 document.getElementById('pageTitle').innerHTML =
   (type === 'live' ? '<span class="live-dot"></span>' : '') + (TITLES[type] || '一覧');
@@ -165,6 +195,51 @@ document.getElementById('pageTitle').innerHTML =
 let activeGames = new Set(GAMES.map(g => g.id));
 let popularRange = '24'; // 人気動画のみ使用
 let officialTab = 'latest'; // 'latest'（新着順）| 'popular'（人気＝7日間の再生数順）
+
+// ▼ここから追加：ページ分け・動画検索 ============================================
+const PAGE_SIZE = 30; // 1ページに表示する件数
+let currentPage = 1;
+let searchKeyword = params.get('q') || '';
+let searchGameId = params.get('game') || '';
+let searchSort = 'latest'; // 'latest'（新着順）| 'popular'（人気＝再生数順）
+
+// 一覧を件数で区切って表示し、下に「前へ／次へ」のページ送りを付ける共通処理
+function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass){
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageItems = items.slice(start, start + PAGE_SIZE);
+  const gridClass = wrapClass || 'card-grid';
+  const gridHtml = pageItems.length
+    ? `<div class="${gridClass}">${pageItems.map(cardFn).join('')}</div>`
+    : emptyHtml(emptyMsg);
+  container.innerHTML = gridHtml + paginationHtml(items.length, totalPages);
+  bindPaginationEvents();
+}
+
+function paginationHtml(totalCount, totalPages){
+  if (totalCount === 0 || totalPages <= 1) return '';
+  return `
+    <div class="pagination">
+      <button class="page-btn" id="pagePrevBtn" ${currentPage<=1?'disabled':''}>◀ 前へ</button>
+      <span class="page-indicator">${currentPage} / ${totalPages} ページ（全${totalCount.toLocaleString()}件）</span>
+      <button class="page-btn" id="pageNextBtn" ${currentPage>=totalPages?'disabled':''}>次へ ▶</button>
+    </div>
+  `;
+}
+
+function bindPaginationEvents(){
+  const prevBtn = document.getElementById('pagePrevBtn');
+  const nextBtn = document.getElementById('pageNextBtn');
+  if (prevBtn) prevBtn.addEventListener('click', () => {
+    currentPage--; renderContent(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  if (nextBtn) nextBtn.addEventListener('click', () => {
+    currentPage++; renderContent(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+// ▲ここまで追加 ============================================
 
 // タイトルが長いゲームは、フィルターメニューでは短い略称で表示する（正式名称はtitle属性で確認可能）。
 // index.htmlと同じルールなので、表示の統一感が崩れないようにここでも揃えている。
@@ -177,6 +252,7 @@ function chipLabelFor(g){
 }
 
 function renderFilterBar(){
+  if (type === 'search') { document.getElementById('filterBar').innerHTML = ''; return; }
   const allActive = activeGames.size === GAMES.length;
   let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
   html += GAMES.map(g => {
@@ -189,12 +265,14 @@ function renderFilterBar(){
 
   document.querySelector('[data-all]').addEventListener('click', () => {
     activeGames = new Set(GAMES.map(g => g.id));
+    currentPage = 1;
     renderAll();
   });
   document.querySelectorAll('#filterBar .game-chip[data-game]').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.game;
       if (activeGames.has(id)) activeGames.delete(id); else activeGames.add(id);
+      currentPage = 1;
       renderAll();
     });
   });
@@ -223,7 +301,7 @@ function renderContent(){
       <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
     </div>`;
     document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
-      btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderContent(); });
+      btn.addEventListener('click', () => { popularRange = btn.dataset.range; currentPage = 1; renderContent(); });
     });
     // 選んだ期間内に「投稿された」動画だけを対象に、再生数順で並べる
     const hoursMap = { '24': 24, '7': 24 * 7, '30': 24 * 30 };
@@ -231,7 +309,7 @@ function renderContent(){
     const filtered = generalVideos.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
     const sorted = [...filtered].sort((a,b) => b.views - a.views);
     const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
-    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml(`${rangeLabel}以内に投稿された動画がありません`)}</div>`;
+    renderPaginatedGrid(el, sorted, videoCardHtml, `${rangeLabel}以内に投稿された動画がありません`);
     return;
   }
 
@@ -241,7 +319,7 @@ function renderContent(){
       <button class="pill-tab ${officialTab==='popular'?'active':''}" data-official-tab="popular">人気（7日間）</button>
     </div>`;
     document.querySelectorAll('.pill-tab[data-official-tab]').forEach(btn => {
-      btn.addEventListener('click', () => { officialTab = btn.dataset.officialTab; renderContent(); });
+      btn.addEventListener('click', () => { officialTab = btn.dataset.officialTab; currentPage = 1; renderContent(); });
     });
     let sorted;
     if (officialTab === 'popular') {
@@ -252,21 +330,69 @@ function renderContent(){
     } else {
       sorted = [...officialVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     }
-    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml('公式チャンネルの動画がありません')}</div>`;
+    renderPaginatedGrid(el, sorted, videoCardHtml, '公式チャンネルの動画がありません');
     return;
   }
 
   if (type === 'latest') {
     subTabsEl.innerHTML = '';
     const sorted = [...generalVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-    el.innerHTML = `<div class="card-grid">${sorted.length ? sorted.map(videoCardHtml).join('') : emptyHtml()}</div>`;
+    renderPaginatedGrid(el, sorted, videoCardHtml);
+    return;
+  }
+
+  if (type === 'search') {
+    subTabsEl.innerHTML = `
+      <div class="search-form">
+        <select id="searchGameSelect" class="search-select">
+          <option value="">すべてのゲーム</option>
+          ${GAMES.map(g => `<option value="${g.id}" ${searchGameId===g.id?'selected':''}>${g.name}</option>`).join('')}
+        </select>
+        <input type="text" id="searchKeywordInput" class="search-input" placeholder="キーワードを入力（動画タイトル）" value="${searchKeyword.replace(/"/g,'&quot;')}">
+        <button class="search-btn" id="searchSubmitBtn">検索</button>
+      </div>
+      <div class="pill-tabs">
+        <button class="pill-tab ${searchSort==='latest'?'active':''}" data-search-sort="latest">新着順</button>
+        <button class="pill-tab ${searchSort==='popular'?'active':''}" data-search-sort="popular">人気順</button>
+      </div>
+    `;
+    document.getElementById('searchSubmitBtn').addEventListener('click', () => {
+      searchKeyword = document.getElementById('searchKeywordInput').value.trim();
+      searchGameId = document.getElementById('searchGameSelect').value;
+      currentPage = 1;
+      renderContent();
+    });
+    document.getElementById('searchKeywordInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('searchSubmitBtn').click();
+    });
+    document.querySelectorAll('.pill-tab[data-search-sort]').forEach(btn => {
+      btn.addEventListener('click', () => { searchSort = btn.dataset.searchSort; currentPage = 1; renderContent(); });
+    });
+
+    if (!searchKeyword && !searchGameId) {
+      el.innerHTML = emptyHtml('キーワードを入力するか、ゲームを選んで「検索」を押してください（直近30日以内に取得した動画が対象です）');
+      return;
+    }
+
+    const kw = searchKeyword.toLowerCase();
+    const allVideos = [...officialVideos, ...generalVideos];
+    let results = allVideos.filter(v => {
+      if (searchGameId && v.game !== searchGameId) return false;
+      if (kw && !v.title.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    results = searchSort === 'popular'
+      ? results.sort((a,b) => b.views - a.views)
+      : results.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+    renderPaginatedGrid(el, results, videoCardHtml, '条件に一致する動画が見つかりませんでした');
     return;
   }
 
   // news
   subTabsEl.innerHTML = '';
   const sorted = [...news].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-  el.innerHTML = `<div class="news-list">${sorted.length ? sorted.map(newsItemWithSummaryHtml).join('') : emptyHtml()}</div>`;
+  renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, undefined, 'news-list');
 }
 
 // 一覧ページでは、ニュースに本文（要約）があれば見出しの下に表示する。クリックで記事詳細へ遷移する。

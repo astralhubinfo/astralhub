@@ -147,10 +147,11 @@ export default {
     }
 
     // 窓口7:キーワードを1つ検索し、見つかったチャンネルを「審査待ちの箱」に入れる(POST /api/discover/search)
-    // body例: { "gameId": "genshin", "keyword": "原神", "minSubscribers": 300, "secondaryKeywords": ["確率炉"] }
+    // body例: { "gameId": "genshin", "keyword": "原神", "minSubscribers": 300, "secondaryKeywords": ["確率炉"], "streamOnly": true }
     // ※1回あたりの通信量を抑えるため、検索だけを行い、詳しい審査は次の窓口(8)で小分けに行います
     // ※minSubscribers(最低登録者数)・secondaryKeywords(副次キーワード)は、審査待ちの箱に一緒に
     //   保存しておき、次の窓口(8)で審査するときにこの条件で判定します。
+    // ※streamOnly(配信のみ)は、検索範囲を「配信(ライブのアーカイブ)」だけに絞り込むかどうかの指定です。
     if (url.pathname === "/api/discover/search" && request.method === "POST") {
       try {
         const body = await request.json().catch(() => ({}));
@@ -162,6 +163,7 @@ export default {
           body.keyword,
           body.minSubscribers,
           body.secondaryKeywords,
+          !!body.streamOnly,
           env
         );
         return jsonResponse(result);
@@ -532,7 +534,7 @@ function parseIsoDuration(iso) {
 //     動画一覧には出さない(LIVE中の間だけ表示する)。
 // ============================================================
 
-const SHORT_VIDEO_MAX_SECONDS = 60; // これ以下の長さは、ショート動画とみなして除外する
+const SHORT_VIDEO_MAX_SECONDS = 75; // これ以下の長さは、ショート動画とみなして除外する(1分15秒)
 
 // タイトル・概要欄に、ショート動画を示すハッシュタグが含まれているか判定する
 function hasShortsHashtag(snippet) {
@@ -820,7 +822,8 @@ const DISCOVER_PROCESS_BATCH_SIZE = 20;
 // 【フェーズA】1つのキーワードで検索し、見つかったチャンネルを「審査待ちの箱」に入れるだけ(通信量は少ない)
 // minSubscribers:このチャンネルを審査するときの最低登録者数(未指定なら既定値のCANDIDATE_MIN_SUBSCRIBERSを使う)
 // secondaryKeywords:プリセットのキーワードに加えて、審査(関連度判定)のときに一緒に使う副次キーワードの配列
-async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeywords, env) {
+// streamOnly:trueの場合、通常の動画投稿は含めず「配信(ライブのアーカイブ)」だけに絞り込んで検索する
+async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeywords, streamOnly, env) {
   const keywords = GAME_KEYWORDS[gameId];
   if (!keywords) {
     throw new Error(`gameId「${gameId}」のキーワードが見つかりません`);
@@ -830,8 +833,8 @@ async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeyw
     Date.now() - CANDIDATE_ACTIVITY_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  // ① 直近1ヶ月の動画を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める(通信1回)
-  const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env);
+  // ① 直近1ヶ月の動画(または配信)を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める(通信1回)
+  const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env, streamOnly);
   const found = new Map(); // channelId -> lastRelatedVideoAt
   for (const item of items) {
     const channelId = item.snippet.channelId;
@@ -846,10 +849,12 @@ async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeyw
     return { found: 0, queued: 0 };
   }
 
-  // ② すでに「本登録済み」「候補として保存済み」「審査待ちの箱に入っている」チャンネルは除外する(通信1回)
+  // ② すでに「本登録済み」「採用済みの候補」「審査待ちの箱に入っている」チャンネルは除外する(通信1回)
+  // ※「却下済み(rejected)」のチャンネルはあえて除外しない → 条件を変えて再検索したときに、
+  //   もう一度見つかって審査し直せるようにするため(基準を満たせば、却下→審査待ちに戻る)
   const { results: existingRows } = await env.DB.prepare(
     `SELECT channel_id FROM channels
-     UNION SELECT channel_id FROM candidate_channels
+     UNION SELECT channel_id FROM candidate_channels WHERE status != 'rejected'
      UNION SELECT channel_id FROM discovery_queue`
   ).all();
   const existingIds = new Set(existingRows.map(r => r.channel_id));
@@ -932,9 +937,19 @@ async function processDiscoveryQueueBatch(env) {
 
     insertStatements.push(
       env.DB.prepare(
-        `INSERT OR IGNORE INTO candidate_channels
-          (channel_id, channel_name, game_id, subscriber_count, relevance_score, japanese_ratio, last_related_video_at, thumbnail_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO candidate_channels
+          (channel_id, channel_name, game_id, subscriber_count, relevance_score, japanese_ratio, last_related_video_at, thumbnail_url, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+         ON CONFLICT(channel_id) DO UPDATE SET
+           channel_name = excluded.channel_name,
+           game_id = excluded.game_id,
+           subscriber_count = excluded.subscriber_count,
+           relevance_score = excluded.relevance_score,
+           japanese_ratio = excluded.japanese_ratio,
+           last_related_video_at = excluded.last_related_video_at,
+           thumbnail_url = excluded.thumbnail_url,
+           status = 'pending',
+           discovered_at = datetime('now')`
       ).bind(ch.id, ch.snippet.title || "", row.game_id, subscriberCount, relevanceScore, japaneseRatio, row.last_related_video_at, thumbnail)
     );
     addedCount++;
@@ -962,12 +977,14 @@ async function processDiscoveryQueueBatch(env) {
 }
 
 // キーワードで、直近の動画を検索する(YouTube search API)
+// streamOnly:trueの場合、通常の動画投稿は含めず「配信(ライブのアーカイブ)」だけに絞り込んで検索する
+//   (YouTube側のeventType=completedを指定。すでに終わったライブ配信のみが対象になる)
 // 1回のキーワード検索につき、何ページ分(50件×ページ数)を見に行くか
 // ※人気のあるキーワードだと1ヶ月で50件を超える投稿があり、新しい50件の裏に隠れて
 //   見つからなくなるチャンネルがあるため、複数ページ分をまとめて見に行くようにしている
 const SEARCH_PAGES_PER_KEYWORD = 3; // 50件 × 3ページ = 最大150件まで
 
-async function searchRecentVideosByKeyword(keyword, publishedAfter, env) {
+async function searchRecentVideosByKeyword(keyword, publishedAfter, env, streamOnly) {
   const allItems = [];
   let pageToken = "";
 
@@ -975,6 +992,7 @@ async function searchRecentVideosByKeyword(keyword, publishedAfter, env) {
     const apiUrl =
       `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=50` +
       `&publishedAfter=${encodeURIComponent(publishedAfter)}&q=${encodeURIComponent(keyword)}` +
+      (streamOnly ? `&eventType=completed` : ``) +
       `&key=${env.YOUTUBE_API_KEY}` +
       (pageToken ? `&pageToken=${pageToken}` : "");
 
