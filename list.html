@@ -120,6 +120,7 @@
   .card-tag-row { display:flex; gap:6px; margin: 8px 0 5px; }
   .tag { font-size: 10.5px; font-weight:700; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
+  .tag.tag-pinned { background: #fdf0d5; color: #a3690a; font-weight: 700; }
   .tag.tag-game { display: inline-block; min-width: 42px; text-align: center; }
   .card-title { font-size:13px; font-weight:500; margin:0 0 4px; line-height:1.4; }
   .card-meta { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); display:flex; justify-content:space-between; }
@@ -134,6 +135,7 @@
   .news-summary { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 4px; line-height:1.6; }
 
   .empty-state { padding: 40px 10px; text-align:center; color: var(--text-faint); font-size:13px; }
+  .empty-state.loading-state { color: var(--text-secondary); }
 
   .site-footer { border-top: 1px solid var(--border); margin-top: 24px; }
   .footer-inner {
@@ -176,7 +178,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, emptyHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
@@ -204,7 +206,7 @@ let searchGameId = params.get('game') || '';
 let searchSort = 'latest'; // 'latest'（新着順）| 'popular'（人気＝再生数順）
 
 // 一覧を件数で区切って表示し、下に「前へ／次へ」のページ送りを付ける共通処理
-function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass){
+function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass, loading){
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   if (currentPage > totalPages) currentPage = totalPages;
   if (currentPage < 1) currentPage = 1;
@@ -213,7 +215,7 @@ function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass){
   const gridClass = wrapClass || 'card-grid';
   const gridHtml = pageItems.length
     ? `<div class="${gridClass}">${pageItems.map(cardFn).join('')}</div>`
-    : emptyHtml(emptyMsg);
+    : (loading ? loadingHtml() : emptyHtml(emptyMsg));
   container.innerHTML = gridHtml + paginationHtml(items.length, totalPages);
   bindPaginationEvents();
 }
@@ -279,9 +281,10 @@ function renderFilterBar(){
 }
 
 function renderContent(){
-  const { news, live, videos } = getFilteredData(activeGames);
+  const { news, live, videos, youtubeLoaded } = getFilteredData(activeGames);
   const el = document.getElementById('listContent');
   const subTabsEl = document.getElementById('subTabs');
+  const loading = !youtubeLoaded; // まだデータベースから一度も読み込めていない間は「読み込み中…」を表示する
 
   // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
   // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は「公式チャンネル」一覧にまとめる。
@@ -290,7 +293,7 @@ function renderContent(){
 
   if (type === 'live') {
     subTabsEl.innerHTML = '';
-    el.innerHTML = `<div class="card-grid">${live.length ? live.map(liveCardHtml).join('') : emptyHtml('現在、配信中の対象アカウントはありません')}</div>`;
+    el.innerHTML = `<div class="card-grid">${live.length ? live.map(liveCardHtml).join('') : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'))}</div>`;
     return;
   }
 
@@ -309,7 +312,7 @@ function renderContent(){
     const filtered = generalVideos.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
     const sorted = [...filtered].sort((a,b) => b.views - a.views);
     const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
-    renderPaginatedGrid(el, sorted, videoCardHtml, `${rangeLabel}以内に投稿された動画がありません`);
+    renderPaginatedGrid(el, sorted, videoCardHtml, `${rangeLabel}以内に投稿された動画がありません`, null, loading);
     return;
   }
 
@@ -330,14 +333,14 @@ function renderContent(){
     } else {
       sorted = [...officialVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     }
-    renderPaginatedGrid(el, sorted, videoCardHtml, '公式チャンネルの動画がありません');
+    renderPaginatedGrid(el, sorted, videoCardHtml, '公式チャンネルの動画がありません', null, loading);
     return;
   }
 
   if (type === 'latest') {
     subTabsEl.innerHTML = '';
     const sorted = [...generalVideos].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-    renderPaginatedGrid(el, sorted, videoCardHtml);
+    renderPaginatedGrid(el, sorted, videoCardHtml, undefined, null, loading);
     return;
   }
 
@@ -385,13 +388,13 @@ function renderContent(){
       ? results.sort((a,b) => b.views - a.views)
       : results.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
 
-    renderPaginatedGrid(el, results, videoCardHtml, '条件に一致する動画が見つかりませんでした');
+    renderPaginatedGrid(el, results, videoCardHtml, '条件に一致する動画が見つかりませんでした', null, loading);
     return;
   }
 
   // news
   subTabsEl.innerHTML = '';
-  const sorted = [...news].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const sorted = sortNewsForDisplay(news);
   renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, undefined, 'news-list');
 }
 
@@ -401,6 +404,7 @@ function newsItemWithSummaryHtml(item){
   const inner = `
     <div class="news-body">
       <div class="card-tag-row">
+        ${item.pinned === 'pinned' ? '<span class="tag tag-pinned">📌 固定</span>' : ''}
         <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
         <span class="tag tag-cat">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
       </div>

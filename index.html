@@ -292,6 +292,7 @@
     color: #fff; white-space: nowrap;
   }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
+  .tag.tag-pinned { background: #fdf0d5; color: #a3690a; font-weight: 700; }
   .tag.tag-game { display: inline-block; min-width: 42px; text-align: center; }
   .card-title {
     font-size: 13px; font-weight: 500; margin: 0 0 4px; line-height: 1.4;
@@ -339,6 +340,7 @@
   .news-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
 
   .empty-state { padding: 30px 10px; text-align: center; color: var(--text-faint); font-size: 13px; }
+  .empty-state.loading-state { color: var(--text-secondary); }
 
   .site-footer { border-top: 1px solid var(--border); margin-top: 8px; }
   .footer-inner {
@@ -489,12 +491,12 @@
 /* =========================================================
    1. マスターデータ
    - GAMES / CATEGORY_LABEL は assets/config.js から読み込み
-   - サンプルデータ・localStorageからの読み込み・カード描画は assets/site-data.js が担当
+   - localStorageからの読み込み・カード描画は assets/site-data.js が担当
    ========================================================= */
 const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CONFIG;
 const {
-  gameById, timeAgoLabel, emptyHtml,
-  liveCardHtml, videoCardHtml, newsItemHtml,
+  gameById, timeAgoLabel, emptyHtml, loadingHtml,
+  liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
   getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo,
 } = window.ASTRA_DATA;
 
@@ -567,9 +569,9 @@ function updateNoteHtml(kind){
 // 上限を超えた分はここでは表示しない（続きは各セクションの「もっと見る ›」から list.html で見る）。
 // sectionKey は 'live' | 'popular' | 'official' | 'latest'
 // extraClass は card-grid に追加したいクラス名（例：公式チャンネル枠の 'official-grid'）。省略可。
-function cardGridCappedHtml(list, cardFn, sectionKey, emptyMessage, extraClass){
+function cardGridCappedHtml(list, cardFn, sectionKey, emptyMessage, extraClass, loading){
   const gridClass = extraClass ? `card-grid ${extraClass}` : 'card-grid';
-  if (!list.length) return `<div class="${gridClass}">${emptyHtml(emptyMessage)}</div>`;
+  if (!list.length) return `<div class="${gridClass}">${loading ? loadingHtml() : emptyHtml(emptyMessage)}</div>`;
   const limit = getDisplayLimit(sectionKey); // 画面幅（パソコン／スマホ）に応じた表示件数
   const visibleList = Number.isFinite(limit) ? list.slice(0, limit) : list;
   return `<div class="${gridClass}">${visibleList.map(cardFn).join('')}</div>`;
@@ -615,14 +617,14 @@ function renderFilterBar(){
   });
 }
 
-function liveSectionHtml(list){
+function liveSectionHtml(list, loading){
   return `<div class="panel" id="live-section">
     <div class="panel-head">
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
       <a class="panel-more" href="list.html?type=live">もっと見る ›</a>
     </div>
     ${updateNoteHtml('live')}
-    ${cardGridCappedHtml(list, liveCardHtml, 'live', '現在、配信中の対象アカウントはありません')}
+    ${cardGridCappedHtml(list, liveCardHtml, 'live', '現在、配信中の対象アカウントはありません', null, loading)}
   </div>`;
 }
 
@@ -637,7 +639,7 @@ function filterByPopularRange(list, range){
   return list.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
 }
 
-function popularSectionHtml(list){
+function popularSectionHtml(list, loading){
   const filtered = filterByPopularRange(list, popularRange);
   const sorted = [...filtered].sort((a,b) => b.views - a.views);
   const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
@@ -652,11 +654,11 @@ function popularSectionHtml(list){
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
       <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
     </div>
-    ${cardGridCappedHtml(sorted, videoCardHtml, 'popular', `${rangeLabel}以内に投稿された動画がありません`)}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'popular', `${rangeLabel}以内に投稿された動画がありません`, null, loading)}
   </div>`;
 }
 
-function latestSectionHtml(list){
+function latestSectionHtml(list, loading){
   const sorted = [...list].sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
   return `<div class="panel" id="latest-section">
     <div class="panel-head">
@@ -664,14 +666,14 @@ function latestSectionHtml(list){
       <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
     ${updateNoteHtml('video')}
-    ${cardGridCappedHtml(sorted, videoCardHtml, 'latest')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'latest', undefined, null, loading)}
   </div>`;
 }
 
 // ▼公式チャンネル専用の枠。人気動画・新着動画には公式チャンネルの動画は出さず、
 //   ここに1本化する。タブで「新着順」⇔「人気（7日間の再生数）順」を切り替えられる。
 //   投稿頻度が少ないため、表示は常に1行だけ（CSSの .official-grid と件数を合わせてある）。
-function officialSectionHtml(list){
+function officialSectionHtml(list, loading){
   let sorted;
   if (officialTab === 'popular') {
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -691,23 +693,24 @@ function officialSectionHtml(list){
       <button class="pill-tab ${officialTab==='latest'?'active':''}" data-official-tab="latest">新着</button>
       <button class="pill-tab ${officialTab==='popular'?'active':''}" data-official-tab="popular">人気（7日間）</button>
     </div>
-    ${cardGridCappedHtml(sorted, videoCardHtml, 'official', '公式チャンネルの動画がありません', 'official-grid')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'official', '公式チャンネルの動画がありません', 'official-grid', loading)}
   </div>`;
 }
 
 function renderMainContent(){
   const el = document.getElementById('mainContent');
-  const { live: fLive, videos: fVideos } = getFilteredData(activeGames);
+  const { live: fLive, videos: fVideos, youtubeLoaded } = getFilteredData(activeGames);
   // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
   // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は下の「公式チャンネル」枠にまとめる。
   const officialVideos = fVideos.filter(v => v.isOfficial);
   const generalVideos = fVideos.filter(v => !v.isOfficial);
+  const loading = !youtubeLoaded; // まだデータベースから一度も読み込めていない間は「読み込み中…」を表示する
 
   const blocks = {
-    live: liveSectionHtml(fLive),
-    popular: popularSectionHtml(generalVideos),
-    official: officialSectionHtml(officialVideos),
-    latest: latestSectionHtml(generalVideos),
+    live: liveSectionHtml(fLive, loading),
+    popular: popularSectionHtml(generalVideos, loading),
+    official: officialSectionHtml(officialVideos, loading),
+    latest: latestSectionHtml(generalVideos, loading),
   };
   el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('');
 
@@ -721,7 +724,7 @@ function renderMainContent(){
 
 function renderSidebar(){
   const { news } = getFilteredData(activeGames);
-  const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const filteredNews = sortNewsForDisplay(news);
   document.getElementById('sidebarNews').innerHTML =
     filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
 }
@@ -729,7 +732,7 @@ function renderSidebar(){
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
     const { news } = getFilteredData(activeGames);
-    const filteredNews = news.sort((a,b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    const filteredNews = sortNewsForDisplay(news);
     document.getElementById('mainContent').innerHTML =
       `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>
        <div class="news-list">${filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml()}</div></div>`;
@@ -747,7 +750,7 @@ function renderAll(){
 renderAll();
 
 /* ▼ここから追加：YouTubeからLIVE・動画データを自動取得する ===========
-   1. まず今までのやり方（サンプル or 管理画面登録データ）で画面を表示（上のrenderAll()）
+   1. まず今までのやり方（管理画面登録データ）で画面を表示（上のrenderAll()）
    2. その裏でYouTubeに問い合わせに行く
    3. 取得できたら、画面をYouTubeのデータで再表示する
    ================================================================== */

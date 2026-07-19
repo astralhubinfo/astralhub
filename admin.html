@@ -146,11 +146,14 @@ const TYPES = {
     fields: [
       { key:'game', label:'ゲーム', type:'game-select' },
       { key:'cat', label:'カテゴリ', type:'select', options: Object.entries(CATEGORY_LABEL).map(([v,l]) => ({value:v, label:l})) },
+      { key:'pinned', label:'固定表示', type:'select', options: [
+        {value:'', label:'固定しない'}, {value:'pinned', label:'固定する（常に一番上に表示）'},
+      ] },
       { key:'title', label:'タイトル（見出し）', type:'text', full:true, placeholder:'例：新キャラクター「○○」公開' },
       { key:'summary', label:'本文（要約）', type:'textarea', full:true, placeholder:'見出しより少し詳しい説明文（100〜200文字程度）' },
       { key:'url', label:'元ツイート/公式ページのURL', type:'text', full:true, placeholder:'https://x.com/...' },
     ],
-    columns: ['game','cat','title','summary','url','time'],
+    columns: ['game','cat','pinned','title','summary','url','time'],
   },
   manualChannels: {
     label: 'チャンネル登録（手動）',
@@ -342,6 +345,7 @@ async function renderTabContent(){
       ${type.columns.map(col => {
         if (col === 'game') return `<td><span class="swatch-tag" style="background:${g ? g.color : '#999'}">${g ? g.name : item.game}</span></td>`;
         if (col === 'cat') return `<td>${CATEGORY_LABEL[item.cat] || item.cat}</td>`;
+        if (col === 'pinned') return `<td>${item.pinned === 'pinned' ? '<span class="swatch-tag" style="background:#e6a729">📌 固定</span>' : '－'}</td>`;
         if (col === 'url') return `<td class="url-cell" title="${item.url || ''}">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener">${item.url}</a>` : '－'}</td>`;
         if (col === 'summary') return `<td class="summary-cell" title="${(item.summary || '').replace(/"/g,'&quot;')}">${item.summary || '－'}</td>`;
         if (col === 'platform') return `<td>${({youtube:'YouTube', twitch:'Twitch', other:'その他'})[item.platform] || item.platform}</td>`;

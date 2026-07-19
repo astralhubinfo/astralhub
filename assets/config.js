@@ -104,6 +104,7 @@ window.ASTRA_CONFIG = {
     code:        'コード',
     event:       'イベント',
     maintenance: 'メンテ',
+    admin:       '管理人',
   },
   SECTION_LABELS: {
     live: '配信（LIVE）',
