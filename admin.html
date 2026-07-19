@@ -791,6 +791,10 @@ async function handleDiscoverSearch(){
       for (const keyword of keywords) {
         btn.textContent = `検索中…（${gameName}：${keyword}）`;
         const r = await apiDiscoverSearchKeyword(gid, keyword, minSubscribers, extraKeywords, streamOnly);
+        if (r.error) {
+          // YouTube側でエラーが起きている場合は、無駄に検索を続けず、ここで中断してはっきり伝える
+          throw new Error(r.error);
+        }
         totalFound += r.found || 0;
         totalQueued += r.queued || 0;
       }

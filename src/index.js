@@ -834,7 +834,7 @@ async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeyw
   ).toISOString();
 
   // ① 直近1ヶ月の動画(または配信)を検索し、候補チャンネルIDと「最新の関連動画の投稿日」を集める(通信1回)
-  const items = await searchRecentVideosByKeyword(keyword, publishedAfter, env, streamOnly);
+  const { items, error: searchError } = await searchRecentVideosByKeyword(keyword, publishedAfter, env, streamOnly);
   const found = new Map(); // channelId -> lastRelatedVideoAt
   for (const item of items) {
     const channelId = item.snippet.channelId;
@@ -846,7 +846,7 @@ async function queueSearchResults(gameId, keyword, minSubscribers, secondaryKeyw
   }
 
   if (found.size === 0) {
-    return { found: 0, queued: 0 };
+    return { found: 0, queued: 0, error: searchError };
   }
 
   // ② すでに「本登録済み」「採用済みの候補」「審査待ちの箱に入っている」チャンネルは除外する(通信1回)
@@ -987,6 +987,7 @@ const SEARCH_PAGES_PER_KEYWORD = 3; // 50件 × 3ページ = 最大150件まで
 async function searchRecentVideosByKeyword(keyword, publishedAfter, env, streamOnly) {
   const allItems = [];
   let pageToken = "";
+  let apiError = null; // エラーが起きた場合、その内容をここに入れて呼び出し元に伝える
 
   for (let page = 0; page < SEARCH_PAGES_PER_KEYWORD; page++) {
     const apiUrl =
@@ -997,7 +998,12 @@ async function searchRecentVideosByKeyword(keyword, publishedAfter, env, streamO
       (pageToken ? `&pageToken=${pageToken}` : "");
 
     const res = await fetch(apiUrl);
-    if (!res.ok) break;
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error("[AstralHub] YouTube検索APIでエラーが発生しました", keyword, res.status, errBody);
+      apiError = `YouTube検索でエラーが発生しました(status: ${res.status})。1日の利用上限に達している可能性があります。`;
+      break;
+    }
     const data = await res.json();
     allItems.push(...(data.items || []));
 
@@ -1005,7 +1011,7 @@ async function searchRecentVideosByKeyword(keyword, publishedAfter, env, streamO
     pageToken = data.nextPageToken;
   }
 
-  return allItems;
+  return { items: allItems, error: apiError };
 }
 
 // チャンネルIDの配列から、詳細情報(登録者数・アップロード一覧の場所など)をまとめて取得する
