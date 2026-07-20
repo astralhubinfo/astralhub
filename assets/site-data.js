@@ -8,15 +8,6 @@
 (function () {
   const { CATEGORY_LABEL, STORAGE_KEYS } = window.ASTRA_CONFIG;
 
-  function loadList(storageKey){
-    try {
-      const raw = localStorage.getItem(storageKey);
-      const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) return arr;
-    } catch (e) { /* 保存データが壊れている場合は空扱いにする */ }
-    return [];
-  }
-
   function loadChannelLedger(){
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.channels);
@@ -137,7 +128,8 @@
   // 自動取得（youtube-auto）データには channelId が入っているので、原則こちらで厳密に一致させる。
   // 手動で登録した古いデータ（channelIdを持たない）は、念のためチャンネル名でも一致を見る。
   function getFilteredData(activeGameIds){
-    const news = loadList(STORAGE_KEYS.news);
+    // ニュースも、LIVE・動画と同じくデータベース(D1)から取得済みのデータ(cachedNews)を使う。
+    const news = cachedNews !== null ? cachedNews : [];
     // LIVE・動画は、データベース(D1)から取得済みのデータ(cachedLive/cachedVideos)を使う。
     // まだ一度も取得できていない場合(ページを開いた直後など)は、取得できるまで空として扱う。
     const live = cachedLive !== null ? cachedLive : [];
@@ -157,14 +149,15 @@
       news: news.filter(n => activeSet.has(n.game)),
       live: live.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
       videos: videos.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
-      // LIVE・動画がデータベースから一度でも読み込めているか(false中は「読み込み中…」を表示するために使う)
+      // LIVE・動画・ニュースがデータベースから一度でも読み込めているか(false中は「読み込み中…」を表示するために使う)
       youtubeLoaded: cachedLive !== null,
+      newsLoaded: cachedNews !== null,
     };
   }
 
   // 記事ページ(article.html)用：フィルターに関係なく、IDから該当ニュース1件を探す
   function findNewsById(id){
-    const news = loadList(STORAGE_KEYS.news);
+    const news = cachedNews !== null ? cachedNews : [];
     return news.find(n => n.id === id) || null;
   }
 
@@ -197,10 +190,11 @@
 
   const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
 
-  // データベース(D1)から取得した最新のLIVE・動画データを、一時的に覚えておくための入れ物。
+  // データベース(D1)から取得した最新のLIVE・動画・ニュースデータを、一時的に覚えておくための入れ物。
   // ページを開いた直後(まだ一度も取得していない)は null のままで、その間は空として扱う。
   let cachedLive = null;
   let cachedVideos = null;
+  let cachedNews = null;
 
   // サーバー(Cloudflare Workers)のAPIから、JSON形式のデータを取得する共通処理
   async function apiFetchJson(path){
@@ -259,6 +253,20 @@
     };
   }
 
+  // データベースの「news」の行を、ニュースカードがそのまま読める形に変換する
+  function mapNewsRow(row){
+    return {
+      id: row.id,
+      game: row.game,
+      cat: row.cat,
+      pinned: row.pinned || '',
+      title: row.title || '',
+      summary: row.summary || '',
+      url: row.url || '',
+      publishedAt: row.published_at,
+    };
+  }
+
   // データベース(D1)から、LIVE・動画の最新情報をまとめて取得する。
   // 取得したデータはcachedLive/cachedVideosに保存され、次にgetFilteredDataが呼ばれたときに使われる。
   // index.html / list.html の読み込み時に1回呼び出す想定(以前のYouTube直接取得版と同じ使い方です)。
@@ -294,10 +302,24 @@
   }
   // ▲ここまで追加 ============================================
 
+  // データベース(D1)から、ニュースの最新情報を取得する。
+  // index.html / list.html / article.html の読み込み時に1回呼び出す想定。
+  async function refreshNewsData(){
+    try {
+      const rows = await apiFetchJson('/api/news');
+      cachedNews = rows.map(mapNewsRow);
+      return true;
+    } catch (e) {
+      console.error('[AstralHub] ニュースの取得に失敗しました', e);
+      cachedNews = cachedNews || []; // 取得に失敗しても、いつまでも「読み込み中」のままにならないようにする
+      return false;
+    }
+  }
+
   window.ASTRA_DATA = {
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
     getFilteredData, findNewsById,
-    refreshYouTubeData, getYoutubeUpdateInfo,
+    refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
   };
 })();

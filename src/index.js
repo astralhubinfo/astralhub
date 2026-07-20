@@ -108,6 +108,48 @@ export default {
       }
     }
 
+    // ===== 2.5 ニュース記事の受付窓口(API) =====
+    // ※以前はブラウザのlocalStorageだけに保存していましたが、それだと管理人本人以外には
+    //   一切表示されなかったため、チャンネル・動画・配信と同じくデータベース(D1)に保存する形にしました。
+
+    // 窓口4-A:ニュース一覧を取得する(GET /api/news)
+    // 「固定表示」を先頭、それ以外は投稿日の新しい順に並べて返す
+    if (url.pathname === "/api/news" && request.method === "GET") {
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT id, game, cat, pinned, title, summary, url, published_at AS publishedAt
+           FROM news
+           ORDER BY (pinned = 'pinned') DESC, published_at DESC`
+        ).all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口4-B:ニュースを1件登録・更新する(POST /api/news)
+    // body に id があれば既存記事の更新(投稿日時は変えない)、なければ新規登録として扱う
+    if (url.pathname === "/api/news" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const result = await saveNewsItem(env.DB, body);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 400);
+      }
+    }
+
+    // 窓口4-C:ニュースを1件削除する(DELETE /api/news/:id)
+    if (url.pathname.startsWith("/api/news/") && request.method === "DELETE") {
+      try {
+        const id = decodeURIComponent(url.pathname.replace("/api/news/", ""));
+        await env.DB.prepare("DELETE FROM news WHERE id = ?").bind(id).run();
+        return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // 窓口5:現在LIVE中のチャンネル一覧を取得する(GET /api/live)
     if (url.pathname === "/api/live" && request.method === "GET") {
       try {
@@ -279,6 +321,49 @@ export default {
       }
     }
 
+    // ===== 2.5 ニュースの受付窓口(API) =====
+    // ※以前はブラウザのlocalStorageにだけ保存していたが、サイトを見る人全員に同じ内容を
+    //   届けるため、チャンネル・動画と同じくデータベース(D1)に保存する方式に変更した。
+
+    // 窓口13:ニュース一覧を取得する(GET /api/news)
+    // 「固定表示」のものを先に、それぞれの中では新しい順に並べて返す
+    if (url.pathname === "/api/news" && request.method === "GET") {
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT * FROM news ORDER BY (pinned = 'pinned') DESC, published_at DESC`
+        ).all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口14:ニュースを登録・更新する(POST /api/news)
+    // body に id が含まれていれば「更新」(登録日時はそのまま)、含まれていなければ「新規登録」として扱う
+    if (url.pathname === "/api/news" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        if (!body.title) {
+          return jsonResponse({ error: "title は必須です" }, 400);
+        }
+        const result = await upsertNews(env.DB, body);
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 窓口15:ニュースを削除する(DELETE /api/news/:id)
+    if (url.pathname.startsWith("/api/news/") && request.method === "DELETE") {
+      try {
+        const id = decodeURIComponent(url.pathname.slice("/api/news/".length));
+        await env.DB.prepare("DELETE FROM news WHERE id = ?").bind(id).run();
+        return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 3. どの窓口にも当てはまらない場合は、今まで通りサイトを表示 =====
     return env.ASSETS.fetch(request);
   },
@@ -298,6 +383,47 @@ export default {
   },
 };
 
+// ニュースを1件、登録または更新する。
+// idが指定されていれば、そのidの行を更新する(登録日時は変えない)。
+// idが指定されていなければ、新しいidを発行して新規登録する(登録日時は今の時刻にする)。
+async function saveNewsItem(db, item) {
+  if (item.id) {
+    await db
+      .prepare(
+        `UPDATE news SET game=?, cat=?, pinned=?, title=?, summary=?, url=? WHERE id=?`
+      )
+      .bind(
+        item.game || "",
+        item.cat || "",
+        item.pinned || "",
+        item.title || "",
+        item.summary || "",
+        item.url || "",
+        item.id
+      )
+      .run();
+    return { id: item.id };
+  }
+
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO news (id, game, cat, pinned, title, summary, url, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    )
+    .bind(
+      id,
+      item.game || "",
+      item.cat || "",
+      item.pinned || "",
+      item.title || "",
+      item.summary || "",
+      item.url || ""
+    )
+    .run();
+  return { id };
+}
+
 // チャンネルを1件、データベースに登録する共通処理
 async function insertChannel(db, ch) {
   if (!ch.channel_id) {
@@ -316,6 +442,36 @@ async function insertChannel(db, ch) {
     .bind(ch.channel_id, ch.channel_name || "", ch.url || "", ch.game || "")
     .run();
   return { success: true, channel_id: ch.channel_id };
+}
+
+// ニュースを1件、登録または更新する。
+// idが指定されていれば、そのidの行を更新する(登録日時は変えない)。
+// idが指定されていなければ、新しいidを発行して新規登録する(登録日時は今の時刻にする)。
+async function upsertNews(db, item) {
+  const id = item.id || crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO news (id, game, cat, pinned, title, summary, url, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET
+         game = excluded.game,
+         cat = excluded.cat,
+         pinned = excluded.pinned,
+         title = excluded.title,
+         summary = excluded.summary,
+         url = excluded.url`
+    )
+    .bind(
+      id,
+      item.game || "",
+      item.cat || "",
+      item.pinned || "",
+      item.title || "",
+      item.summary || "",
+      item.url || ""
+    )
+    .run();
+  return { success: true, id };
 }
 
 // JSON形式で返事を返すための共通処理

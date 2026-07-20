@@ -262,6 +262,34 @@ async function apiDeleteChannel(channelId){
   return res.json();
 }
 
+// データベースからニュース一覧を取得する
+async function apiGetNews(){
+  const res = await fetch('/api/news');
+  if (!res.ok) throw new Error('データベースからの取得に失敗しました');
+  return res.json();
+}
+
+// ニュースを1件、登録・更新する(idがあれば更新、なければ新規登録としてサーバー側で扱う)
+async function apiSaveNews(item){
+  const res = await fetch('/api/news', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '保存に失敗しました');
+  }
+  return res.json();
+}
+
+// データベースからニュースを1件削除する
+async function apiDeleteNews(id){
+  const res = await fetch('/api/news/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!res.ok) throw new Error('削除に失敗しました');
+  return res.json();
+}
+
 // ▲ここまで追加 ============================================
 
 function showToast(msg){
@@ -310,17 +338,18 @@ async function renderTabContent(){
   const type = TYPES[activeType];
 
   let items;
-  if (activeType === 'manualChannels') {
+  if (activeType === 'manualChannels' || activeType === 'news') {
+    const loadingType = activeType; // 読み込み中にタブが切り替えられたかどうかを、あとで確認するために覚えておく
     // データベースからの取得には少し時間がかかるため、その間は「読み込み中」を表示する
     document.getElementById('tabContent').innerHTML = '<div class="panel"><p class="hint">読み込み中…</p></div>';
     try {
-      items = await apiGetChannels();
+      items = loadingType === 'news' ? await apiGetNews() : await apiGetChannels();
     } catch (e) {
       showToast(e.message || 'データベースからの取得に失敗しました');
       items = [];
     }
     // 読み込み中の間にタブが切り替えられていたら、古い結果は表示しない
-    if (activeType !== 'manualChannels') return;
+    if (activeType !== loadingType) return;
   } else {
     items = loadItems(activeType);
   }
@@ -431,6 +460,24 @@ async function renderTabContent(){
       return;
     }
 
+    if (activeType === 'news') {
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.disabled = true;
+      try {
+        // 編集の場合はidを一緒に送ることで、サーバー側が「更新」と判断する(登録日時は変わらない)
+        const payload = isEditing ? { id: editingItem.id, ...formValues } : formValues;
+        await apiSaveNews(payload);
+        showToast(isEditing ? '保存しました' : '登録しました');
+        editingIndex = null;
+      } catch (e) {
+        showToast(e.message || '保存に失敗しました');
+      } finally {
+        submitBtn.disabled = false;
+      }
+      renderTabContent();
+      return;
+    }
+
     const current = loadItems(activeType);
     if (isEditing) {
       // 登録日時(publishedAt)は変更せず、それ以外の項目だけ上書きする
@@ -469,6 +516,19 @@ async function renderTabContent(){
         if (!target) return;
         try {
           await apiDeleteChannel(target.channelId);
+          showToast('削除しました');
+        } catch (e) {
+          showToast(e.message || '削除に失敗しました');
+        }
+        renderTabContent();
+        return;
+      }
+
+      if (activeType === 'news') {
+        const target = items[idx];
+        if (!target) return;
+        try {
+          await apiDeleteNews(target.id);
           showToast('削除しました');
         } catch (e) {
           showToast(e.message || '削除に失敗しました');

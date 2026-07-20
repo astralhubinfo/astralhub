@@ -281,10 +281,11 @@ function renderFilterBar(){
 }
 
 function renderContent(){
-  const { news, live, videos, youtubeLoaded } = getFilteredData(activeGames);
+  const { news, live, videos, youtubeLoaded, newsLoaded } = getFilteredData(activeGames);
   const el = document.getElementById('listContent');
   const subTabsEl = document.getElementById('subTabs');
   const loading = !youtubeLoaded; // まだデータベースから一度も読み込めていない間は「読み込み中…」を表示する
+  const newsLoading = !newsLoaded;
 
   // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
   // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は「公式チャンネル」一覧にまとめる。
@@ -395,7 +396,7 @@ function renderContent(){
   // news
   subTabsEl.innerHTML = '';
   const sorted = sortNewsForDisplay(news);
-  renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, undefined, 'news-list');
+  renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, undefined, 'news-list', newsLoading);
 }
 
 // 一覧ページでは、ニュースに本文（要約）があれば見出しの下に表示する。クリックで記事詳細へ遷移する。
@@ -441,14 +442,34 @@ function renderAll(){
 renderAll();
 
 // list.htmlに直接アクセスされた場合（index.htmlを経由していない場合）でも、
-// LIVE・動画データが最新の状態になるよう、ここでも自動取得を行う
-if (window.ASTRA_DATA.refreshYouTubeData) {
+// LIVE・動画・ニュースデータが最新の状態になるよう、ここでも自動取得を行う。
+// ページを開いたままでも古い情報のままにならないよう、数分おきに再取得する。
+function fetchYouTubeAndRenderList(){
+  if (!window.ASTRA_DATA.refreshYouTubeData) return;
   window.ASTRA_DATA.refreshYouTubeData().then(updated => {
     if (updated) renderAll();
   }).catch(e => {
     console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
   });
 }
+function fetchNewsAndRenderList(){
+  if (!window.ASTRA_DATA.refreshNewsData) return;
+  window.ASTRA_DATA.refreshNewsData().then(() => {
+    renderAll();
+  }).catch(e => {
+    console.error('[AstralHub] ニュースの自動取得でエラーが発生しました', e);
+  });
+}
+fetchYouTubeAndRenderList();
+fetchNewsAndRenderList();
+
+const LIVE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+setInterval(() => { if (!document.hidden) fetchYouTubeAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
+setInterval(() => { if (!document.hidden) fetchNewsAndRenderList(); }, NEWS_REFRESH_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { fetchYouTubeAndRenderList(); fetchNewsAndRenderList(); }
+});
 </script>
 </body>
 </html>

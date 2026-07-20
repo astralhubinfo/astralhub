@@ -497,7 +497,7 @@ const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CON
 const {
   gameById, timeAgoLabel, emptyHtml, loadingHtml,
   liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
-  getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo,
+  getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -723,19 +723,20 @@ function renderMainContent(){
 }
 
 function renderSidebar(){
-  const { news } = getFilteredData(activeGames);
+  const { news, newsLoaded } = getFilteredData(activeGames);
   const filteredNews = sortNewsForDisplay(news);
-  document.getElementById('sidebarNews').innerHTML =
-    filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml();
+  document.getElementById('sidebarNews').innerHTML = filteredNews.length
+    ? filteredNews.map(newsItemHtml).join('')
+    : (newsLoaded ? emptyHtml() : loadingHtml());
 }
 
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
-    const { news } = getFilteredData(activeGames);
+    const { news, newsLoaded } = getFilteredData(activeGames);
     const filteredNews = sortNewsForDisplay(news);
     document.getElementById('mainContent').innerHTML =
       `<div class="panel"><div class="panel-head"><span class="panel-title">最新ニュース</span></div>
-       <div class="news-list">${filteredNews.length ? filteredNews.map(newsItemHtml).join('') : emptyHtml()}</div></div>`;
+       <div class="news-list">${filteredNews.length ? filteredNews.map(newsItemHtml).join('') : (newsLoaded ? emptyHtml() : loadingHtml())}</div></div>`;
     return true;
   }
   return false;
@@ -751,13 +752,35 @@ renderAll();
 
 /* ▼ここから追加：YouTubeからLIVE・動画データを自動取得する ===========
    1. まず今までのやり方（管理画面登録データ）で画面を表示（上のrenderAll()）
-   2. その裏でYouTubeに問い合わせに行く
-   3. 取得できたら、画面をYouTubeのデータで再表示する
+   2. その裏でYouTube・ニュースのデータベースに問い合わせに行く
+   3. 取得できたら、画面を最新のデータで再表示する
+   4. ページを開いたままでも古い情報のままにならないよう、数分おきに②③を繰り返す
    ================================================================== */
-ASTRA_DATA.refreshYouTubeData().then(updated => {
-  if (updated) renderAll();
-}).catch(e => {
-  console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
+function fetchYouTubeAndRender(){
+  ASTRA_DATA.refreshYouTubeData().then(updated => {
+    if (updated) renderAll();
+  }).catch(e => {
+    console.error('[AstralHub] YouTubeデータの自動取得でエラーが発生しました', e);
+  });
+}
+function fetchNewsAndRender(){
+  ASTRA_DATA.refreshNewsData().then(() => {
+    renderAll();
+  }).catch(e => {
+    console.error('[AstralHub] ニュースの自動取得でエラーが発生しました', e);
+  });
+}
+fetchYouTubeAndRender();
+fetchNewsAndRender();
+
+// LIVE情報は動きが早いため2分おき、ニュースは動きが遅いため10分おきに自動更新する。
+// ただし、他のタブを見ている間(バックグラウンド)は通信を止め、タブに戻ってきたときにまとめて更新する。
+const LIVE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+setInterval(() => { if (!document.hidden) fetchYouTubeAndRender(); }, LIVE_REFRESH_INTERVAL_MS);
+setInterval(() => { if (!document.hidden) fetchNewsAndRender(); }, NEWS_REFRESH_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { fetchYouTubeAndRender(); fetchNewsAndRender(); }
 });
 /* ▲ここまで追加 ====================================================== */
 
