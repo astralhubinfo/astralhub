@@ -115,6 +115,7 @@
   /* ---------- Filter bar ---------- */
   .filter-bar-wrap {
     max-width: 1240px; margin: 0 auto; padding: 14px 20px 14px;
+    position: relative;
   }
   .filter-bar {
     display: flex; gap: 8px; flex-wrap: wrap;
@@ -140,6 +141,7 @@
   .game-chip.chip-all.inactive {
     background: var(--bg); border-color: var(--border); color: var(--text-secondary); font-weight: 500;
   }
+  .game-chip.chip-all .chip-all-short { display: none; }
   /* アイコン表示用のエリア（PC：小さい角丸四角／スマホ：大きい丸、下のメディアクエリで上書き） */
   .chip-icon-wrap {
     display: flex;
@@ -181,19 +183,31 @@
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
       padding-bottom: 2px;
-      /* スクロールできることが分かるよう、右端をふわっとフェードさせる */
-      mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
-      -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
     }
     .filter-bar::-webkit-scrollbar { display: none; }
+    /* スクロールできることが分かるよう、右端に薄いフェードの層を重ねる
+       （中身自体をmaskで消すと、スクロール中に表示が乱れることがあるため、
+       別レイヤーとして上に重ねる方式にしている） */
+    .filter-bar-wrap::after {
+      content: '';
+      position: absolute;
+      top: 0; bottom: 2px; right: 14px;
+      width: 28px;
+      background: linear-gradient(to right, transparent, var(--surface) 75%);
+      pointer-events: none;
+    }
 
     .game-chip.chip-all {
       flex-shrink: 0;
-      padding: 0 13px;
+      width: 44px;
       height: 44px;
-      border-radius: 22px;
-      font-size: 12px;
+      padding: 0;
+      border-radius: 50%;
+      justify-content: center;
+      font-size: 13px;
     }
+    .game-chip.chip-all .chip-all-full { display: none; }
+    .game-chip.chip-all .chip-all-short { display: inline; }
     .game-chip[data-game] {
       flex-shrink: 0;
       width: 44px;
@@ -435,9 +449,15 @@
       <a href="list.html?type=news">最新ニュース</a>
     </nav>
     <div class="header-right">
-      <a class="icon-btn" href="list.html?type=search" title="動画を検索" aria-label="動画を検索">🔍</a>
-      <a class="icon-btn" href="contact.html" title="お問い合わせ" aria-label="お問い合わせ">✉</a>
-      <button class="icon-btn" id="settingsOpenBtn" title="表示順の設定" aria-label="表示順の設定">⚙</button>
+      <a class="icon-btn" href="list.html?type=search" title="動画を検索" aria-label="動画を検索">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      </a>
+      <a class="icon-btn" href="contact.html" title="お問い合わせ" aria-label="お問い合わせ">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="2 6 12 13 22 6"></polyline></svg>
+      </a>
+      <button class="icon-btn" id="settingsOpenBtn" title="表示順の設定" aria-label="表示順の設定">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
     </div>
   </div>
   <div class="filter-bar-wrap">
@@ -591,7 +611,7 @@ function chipLabelFor(g){
 
 function renderFilterBar(){
   const allActive = activeGames.size === GAMES.length;
-  let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
+  let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1"><span class="chip-all-full">すべて</span><span class="chip-all-short">全</span></button>`;
   html += GAMES.map(g => {
     const active = activeGames.has(g.id);
     const initial = (g.name || '?').charAt(0);
@@ -834,7 +854,14 @@ document.querySelectorAll('#mobileTabbar button').forEach(btn => {
     renderAll();
   });
 });
-window.addEventListener('resize', renderAll);
+// ウィンドウのリサイズ中は毎ピクセルごとにイベントが発生し、そのたびに
+// renderAll()（全体の再描画）を呼ぶと負荷が高いため、動きが止まってから
+// 150ミリ秒後に1回だけ再描画するようにして間引いている。
+let resizeRenderTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeRenderTimer);
+  resizeRenderTimer = setTimeout(renderAll, 150);
+});
 
 </script>
 </body>
