@@ -818,6 +818,9 @@ async function refreshLiveChannels(env) {
 }
 
 // ③直近30日間に投稿された動画の再生回数を、まとめて更新する(人気動画ランキング用)
+// ③直近30日間に投稿された動画を、まとめて最新の状態に更新する
+// (再生数だけでなく、タイトル・サムネイルも取り直し、タイトルからゲーム判定もやり直す。
+//  投稿者があとからタイトルを訂正した場合や、判定不可になった場合にも自動で追従できるようにするため)
 async function refreshRecentVideoStats(env) {
   const { results } = await env.DB.prepare(
     "SELECT video_id FROM videos WHERE published_at >= datetime('now', '-30 days')"
@@ -827,15 +830,48 @@ async function refreshRecentVideoStats(env) {
   const videoIds = results.map(r => r.video_id);
   const videoMap = await fetchVideosBatched(videoIds, env);
 
+  const updateStatements = [];
+  const deleteIds = [];
+
   for (const videoId of videoIds) {
     const video = videoMap[videoId];
-    if (!video) continue;
+    if (!video) {
+      // YouTube側ですでに削除・非公開になっている → 一覧から取り除く
+      deleteIds.push(videoId);
+      continue;
+    }
+
+    // 今の内容(タイトルなど)であらためて判定し直す
+    // (ショート化・配信アーカイブ化・ゲーム判定不可になっていれば取り除く)
+    const action = resolveVideoAction(video);
+    if (!action.save || action.kind !== "video") {
+      deleteIds.push(videoId);
+      continue;
+    }
+
+    const snippet = video.snippet || {};
     const statistics = video.statistics || {};
-    await env.DB.prepare(
-      "UPDATE videos SET view_count = ?, updated_at = datetime('now') WHERE video_id = ?"
-    )
-      .bind(Number(statistics.viewCount) || 0, videoId)
-      .run();
+    const thumbnails = snippet.thumbnails || {};
+    const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+
+    updateStatements.push(
+      env.DB.prepare(
+        `UPDATE videos SET title = ?, thumbnail_url = ?, game = ?, view_count = ?, updated_at = datetime('now')
+         WHERE video_id = ?`
+      ).bind(snippet.title || "", thumbnail, action.gameId, Number(statistics.viewCount) || 0, videoId)
+    );
+  }
+
+  const allStatements = [...updateStatements];
+  if (deleteIds.length > 0) {
+    allStatements.push(
+      env.DB.prepare(
+        `DELETE FROM videos WHERE video_id IN (${deleteIds.map(() => "?").join(",")})`
+      ).bind(...deleteIds)
+    );
+  }
+  if (allStatements.length > 0) {
+    await env.DB.batch(allStatements);
   }
 }
 
