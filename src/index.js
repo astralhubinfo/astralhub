@@ -560,7 +560,7 @@ async function fetchAndStoreVideo(videoId, channelId, env) {
   const video = data.items && data.items[0];
   if (!video) return;
 
-  const action = resolveVideoAction(video);
+  const action = resolveVideoAction(video, channelId);
   if (!action.save) return; // ショート動画・配信アーカイブ・ゲーム判定不可のいずれかのため保存しない
 
   const snippet = video.snippet || {};
@@ -625,6 +625,22 @@ function parseIsoDuration(iso) {
 
 const SHORT_VIDEO_MAX_SECONDS = 75; // これ以下の長さは、ショート動画とみなして除外する(1分15秒)
 
+// ▼公式チャンネル(特別枠)の一覧 ============================================
+// ここに登録したチャンネルは、動画の「長さ」によるショート判定を行いません。
+// (ゲーム内CMやムービーなど、30秒前後の正規動画を公式が投稿する傾向があるため)
+// ただし、#shorts などのハッシュタグが付いている場合は、公式チャンネルでも
+// これまで通りショートとして除外されます。
+//
+// ※このリストは assets/site-data.js 内の OFFICIAL_CHANNELS と
+//   同じ内容にしてください(チャンネルを追加・削除する場合は両方直す必要があります)。
+const OFFICIAL_CHANNEL_IDS = new Set([
+  'UCAVR6Q0YgYa8xwz8rdg9Mrg', // 原神 公式チャンネル
+  'UCrzCIt5o0X88G9bCdrdbv6g', // 崩壊：スターレイル 公式チャンネル
+  'UCt09C9DPSuOGpHoitbcyCIQ', // ゼンレスゾーンゼロ 公式チャンネル
+  'UCGc93NguHRwzv1Rw9MyIcxQ', // 鳴潮 公式チャンネル
+  'UClKUii0-uZwx6QOFIEJ1foA', // NTE 公式チャンネル
+]);
+
 // タイトル・概要欄に、ショート動画を示すハッシュタグが含まれているか判定する
 function hasShortsHashtag(snippet) {
   const text = `${snippet.title || ""} ${snippet.description || ""}`;
@@ -634,8 +650,9 @@ function hasShortsHashtag(snippet) {
 }
 
 // 動画の長さ・ハッシュタグから、ショート動画かどうかを判定する
-function isShortVideo(snippet, durationSeconds) {
-  if (durationSeconds > 0 && durationSeconds <= SHORT_VIDEO_MAX_SECONDS) return true;
+// isOfficial が true の場合、長さによる判定はスキップする(ハッシュタグ判定のみ行う)
+function isShortVideo(snippet, durationSeconds, isOfficial) {
+  if (!isOfficial && durationSeconds > 0 && durationSeconds <= SHORT_VIDEO_MAX_SECONDS) return true;
   return hasShortsHashtag(snippet);
 }
 
@@ -651,13 +668,15 @@ function classifyGameIdForItem(title) {
 }
 
 // 動画・配信1件分の情報から、「保存すべきか」「保存する場合は配信か動画か・どのゲームか」を判定する
+// channelId: 公式チャンネルかどうかの判定に使用します
 // 戻り値: { save: false } または { save: true, kind: 'live'|'video', gameId, durationSeconds }
-function resolveVideoAction(video) {
+function resolveVideoAction(video, channelId) {
   const snippet = video.snippet || {};
   const contentDetails = video.contentDetails || {};
   const durationSeconds = parseIsoDuration(contentDetails.duration || "");
   const isCurrentlyLive = snippet.liveBroadcastContent === "live";
   const isLiveRelated = !!video.liveStreamingDetails; // 配信中・配信予定・配信アーカイブのいずれか
+  const isOfficial = OFFICIAL_CHANNEL_IDS.has(channelId);
 
   // 配信が終わった後のアーカイブ・配信予定のものは、動画一覧には出さない
   if (isLiveRelated && !isCurrentlyLive) {
@@ -665,7 +684,7 @@ function resolveVideoAction(video) {
   }
 
   // ショート動画は除外する(配信中のものは対象外)
-  if (!isCurrentlyLive && isShortVideo(snippet, durationSeconds)) {
+  if (!isCurrentlyLive && isShortVideo(snippet, durationSeconds, isOfficial)) {
     return { save: false };
   }
 
@@ -750,11 +769,15 @@ async function refreshLiveChannels(env) {
 //  投稿者があとからタイトルを訂正した場合や、判定不可になった場合にも自動で追従できるようにするため)
 async function refreshRecentVideoStats(env) {
   const { results } = await env.DB.prepare(
-    "SELECT video_id FROM videos WHERE published_at >= datetime('now', '-30 days')"
+    "SELECT video_id, channel_id FROM videos WHERE published_at >= datetime('now', '-30 days')"
   ).all();
   if (results.length === 0) return;
 
   const videoIds = results.map(r => r.video_id);
+  const channelIdByVideoId = {};
+  for (const row of results) {
+    channelIdByVideoId[row.video_id] = row.channel_id;
+  }
   const videoMap = await fetchVideosBatched(videoIds, env);
 
   const updateStatements = [];
@@ -770,7 +793,7 @@ async function refreshRecentVideoStats(env) {
 
     // 今の内容(タイトルなど)であらためて判定し直す
     // (ショート化・配信アーカイブ化・ゲーム判定不可になっていれば取り除く)
-    const action = resolveVideoAction(video);
+    const action = resolveVideoAction(video, channelIdByVideoId[videoId]);
     if (!action.save || action.kind !== "video") {
       deleteIds.push(videoId);
       continue;
@@ -852,7 +875,7 @@ async function syncChannelInitialContent(channelId, gameId, env) {
     const video = videoMap[videoId];
     if (!video) continue;
 
-    const action = resolveVideoAction(video);
+    const action = resolveVideoAction(video, channelId);
     if (!action.save) continue; // ショート動画・配信アーカイブ・ゲーム判定不可のいずれかのため取り込まない
 
     const snippet = video.snippet || {};
