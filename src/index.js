@@ -95,12 +95,18 @@ export default {
     }
 
     // 窓口4:チャンネルを削除する(DELETE /api/channels/:channel_id)
+    // ※チャンネル本体だけでなく、そのチャンネルの動画・配信状況のデータも一緒に削除する。
+    //   (以前はチャンネルだけ消して動画は残っていたため、削除したはずのチャンネルの動画が
+    //    トップページに表示され続けてしまう不具合がありました)
     if (url.pathname.startsWith("/api/channels/") && request.method === "DELETE") {
       try {
         const channelId = decodeURIComponent(url.pathname.replace("/api/channels/", ""));
-        await env.DB.prepare("DELETE FROM channels WHERE channel_id = ?")
-          .bind(channelId)
-          .run();
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM channels WHERE channel_id = ?").bind(channelId),
+          env.DB.prepare("DELETE FROM videos WHERE channel_id = ?").bind(channelId),
+          env.DB.prepare("DELETE FROM live_status WHERE channel_id = ?").bind(channelId),
+          env.DB.prepare("DELETE FROM websub_subscriptions WHERE channel_id = ?").bind(channelId),
+        ]);
         await requestWebSubUnsubscribe(channelId, env).catch(() => {});
         return jsonResponse({ success: true });
       } catch (err) {
