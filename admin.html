@@ -71,8 +71,9 @@
   .submit-btn:disabled { background: var(--text-faint); cursor: default; }
   .gacha-only { display:none; }
   .gacha-item-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
-  .gacha-item-row input { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
+  .gacha-item-row input[type="text"] { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
   .gacha-item-row select.gacha-kind { flex:none; width:84px; padding: 9px 6px; border:1px solid var(--border); border-radius: var(--radius-sm); }
+  .gacha-highlight-label { flex:none; display:flex; align-items:center; gap:4px; font-size:12px; color: var(--text-secondary); white-space:nowrap; }
   .gacha-item-row .remove-item-btn {
     border:1px solid var(--border); background:var(--bg); color: var(--live); border-radius: var(--radius-sm);
     padding: 8px 11px; font-size:13px; flex:none;
@@ -450,7 +451,7 @@ async function renderTabContent(){
   // 1行=1体(1つ)のピックアップ。「＋」ボタンで自由に行を増やし、「✕」で削除できる。
   if (activeType === 'news') {
     function addGachaItemRow(item){
-      item = item || { name:'', rarity:'', type:'', kind:'character' };
+      item = item || { name:'', rarity:'', type:'', kind:'character', highlight:false };
       const list = document.getElementById('gachaItemsList');
       const row = document.createElement('div');
       row.className = 'gacha-item-row';
@@ -464,6 +465,9 @@ async function renderTabContent(){
         <input type="text" class="gacha-name" placeholder="名前（例：〇〇）" value="${esc(item.name)}">
         <input type="text" class="gacha-rarity" placeholder="レアリティ（例：★5、S）" value="${esc(item.rarity)}">
         <input type="text" class="gacha-type" placeholder="属性・武器種（例：炎、片手剣）" value="${esc(item.type)}">
+        <label class="gacha-highlight-label">
+          <input type="checkbox" class="gacha-highlight" ${item.highlight ? 'checked' : ''}>最高レア
+        </label>
         <button type="button" class="remove-item-btn">✕</button>
       `;
       row.querySelector('.remove-item-btn').addEventListener('click', () => row.remove());
@@ -519,6 +523,7 @@ async function renderTabContent(){
         name: row.querySelector('.gacha-name').value.trim(),
         rarity: row.querySelector('.gacha-rarity').value.trim(),
         type: row.querySelector('.gacha-type').value.trim(),
+        highlight: row.querySelector('.gacha-highlight').checked,
       })).filter(it => it.name);
     }
 

@@ -352,7 +352,7 @@
   function gachaItemsTableHtml(items){
     if (!Array.isArray(items) || items.length === 0) return '';
     const esc = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const rowsHtml = (list) => list.map(it => `<tr>
+    const rowsHtml = (list) => list.map(it => `<tr${it.highlight ? ' class="gacha-highlight-row"' : ''}>
       <td>${esc(it.name)}</td><td>${esc(it.rarity)}</td><td>${esc(it.type)}</td>
     </tr>`).join('');
 
