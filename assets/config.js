@@ -105,6 +105,7 @@ window.ASTRA_CONFIG = {
     event:       'イベント',
     maintenance: 'メンテ',
     admin:       '管理人',
+    gacha:       'ガチャ',
   },
   SECTION_LABELS: {
     live: '配信（LIVE）',

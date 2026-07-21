@@ -69,6 +69,17 @@
 
   /* ▼チャンネル発掘機能 */
   .submit-btn:disabled { background: var(--text-faint); cursor: default; }
+  .gacha-only { display:none; }
+  .gacha-item-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .gacha-item-row input { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
+  .gacha-item-row .remove-item-btn {
+    border:1px solid var(--border); background:var(--bg); color: var(--live); border-radius: var(--radius-sm);
+    padding: 8px 11px; font-size:13px; flex:none;
+  }
+  .add-item-btn {
+    border:1px dashed var(--accent); background:var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm);
+    padding: 8px 14px; font-size:12.5px; font-weight:600; margin-top:2px;
+  }
   .discover-list { display:flex; flex-direction:column; gap:8px; max-height: 480px; overflow-y:auto; }
   .discover-item {
     display:flex; align-items:center; gap:12px; padding:10px; border:1px solid var(--border);
@@ -152,6 +163,8 @@ const TYPES = {
       { key:'title', label:'タイトル（見出し）', type:'text', full:true, placeholder:'例：新キャラクター「○○」公開' },
       { key:'summary', label:'本文（要約）', type:'textarea', full:true, placeholder:'見出しより少し詳しい説明文（100〜200文字程度）' },
       { key:'url', label:'元ツイート/公式ページのURL', type:'text', full:true, placeholder:'https://x.com/...' },
+      { key:'gachaStart', label:'ガチャ開始日時（カテゴリ「ガチャ」の場合のみ）', type:'datetime-local', extraClass:'gacha-only' },
+      { key:'gachaEnd', label:'ガチャ終了日時（カテゴリ「ガチャ」の場合のみ）', type:'datetime-local', extraClass:'gacha-only' },
     ],
     columns: ['game','cat','pinned','title','summary','url','time'],
   },
@@ -216,6 +229,15 @@ function saveItems(type, items){
   try { localStorage.setItem(storageKeyFor(type), JSON.stringify(items)); } catch (e) { showToast('保存に失敗しました（ブラウザのストレージ設定をご確認ください）'); }
 }
 function gameById(id){ return GAMES.find(g => g.id === id); }
+
+// データベース(SQLite)に保存されている日時は「2026-07-20 12:34:56」のような、
+// Tを使わない形式のため、ブラウザによってはそのままDateに渡すと日付が読み取れない
+// （NaN日前・Invalid Dateと表示される）ことがある。ここでISO8601形式に変換してから使う。
+function toDateSafe(str){
+  if (!str) return new Date(NaN);
+  const iso = String(str).includes('T') ? str : String(str).replace(' ', 'T') + 'Z';
+  return new Date(iso);
+}
 
 // ▼ここから追加：チャンネル登録（手動）をデータベース(D1)とやり取りするための関数 ============================================
 // 「チャンネル登録（手動）」は、以前はブラウザの中(LocalStorage)に保存していましたが、
@@ -328,7 +350,7 @@ function fieldHtml(f){
       <textarea data-field="${f.key}" rows="3" placeholder="${f.placeholder || ''}"></textarea>
     </div>`;
   }
-  return `<div class="field${f.full?' full':''}"><label>${f.label}</label>
+  return `<div class="field${f.full?' full':''}${f.extraClass?' '+f.extraClass:''}"><label>${f.label}</label>
     <input type="${f.type}" data-field="${f.key}" placeholder="${f.placeholder || ''}">
   </div>`;
 }
@@ -360,7 +382,13 @@ async function renderTabContent(){
     <div class="panel">
       <h2>${isEditing ? `編集：${type.label}` : `新規登録：${type.label}`}</h2>
       <p class="hint">${isEditing ? '内容を修正して「保存する」を押してください。' : (type.hint || 'Xの通知などで見つけた投稿の内容を、ここに手で入力してください。登録すると一覧に追加され、サイト（index.html）側にもすぐ反映されます。')}</p>
-      <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}</div>
+      <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}${activeType === 'news' ? `
+        <div class="field full gacha-only" id="gachaItemsField">
+          <label>ピックアップ一覧（カテゴリ「ガチャ」の場合のみ／キャラ・武器を自由に追加できます）</label>
+          <div id="gachaItemsList"></div>
+          <button type="button" class="add-item-btn" id="addGachaItemBtn">＋ ピックアップを追加</button>
+        </div>
+      ` : ''}</div>
       <div style="display:flex; gap:8px;">
         <button class="submit-btn" id="submitBtn">${isEditing ? '保存する' : '登録する'}</button>
         ${isEditing ? '<button class="submit-btn" id="cancelEditBtn" style="background:var(--text-faint);">キャンセル</button>' : ''}
@@ -381,7 +409,7 @@ async function renderTabContent(){
         if (col === 'language') return `<td>${({ja:'日本語', en:'英語', other:'その他'})[item.language] || item.language}</td>`;
         if (col === 'blocked') return `<td>${item.blocked === 'block' ? '<span class="swatch-tag" style="background:#e23d3d">非掲載</span>' : '<span class="swatch-tag" style="background:#1fae7a">掲載中</span>'}</td>`;
         if (col === 'blockReason') return `<td>${item.blockReason || '－'}</td>`;
-        if (col === 'time') return `<td>${new Date(item.publishedAt).toLocaleString('ja-JP')}</td>`;
+        if (col === 'time') return `<td>${toDateSafe(item.publishedAt).toLocaleString('ja-JP')}</td>`;
         if (col === 'views' || col === 'viewers') return `<td>${(item[col] || 0).toLocaleString()}</td>`;
         return `<td>${item[col] ?? ''}</td>`;
       }).join('')}
@@ -417,6 +445,50 @@ async function renderTabContent(){
     });
   }
 
+  // ▼ここから追加：ガチャのピックアップ一覧(名前・レアリティ・属性/武器種)の入力欄 ============
+  // 1行=1体(1つ)のピックアップ。「＋」ボタンで自由に行を増やし、「✕」で削除できる。
+  if (activeType === 'news') {
+    function addGachaItemRow(item){
+      item = item || { name:'', rarity:'', type:'' };
+      const list = document.getElementById('gachaItemsList');
+      const row = document.createElement('div');
+      row.className = 'gacha-item-row';
+      const esc = (s) => String(s || '').replace(/"/g, '&quot;');
+      row.innerHTML = `
+        <input type="text" class="gacha-name" placeholder="名前（例：〇〇）" value="${esc(item.name)}">
+        <input type="text" class="gacha-rarity" placeholder="レアリティ（例：★5、S）" value="${esc(item.rarity)}">
+        <input type="text" class="gacha-type" placeholder="属性・武器種（例：炎、片手剣）" value="${esc(item.type)}">
+        <button type="button" class="remove-item-btn">✕</button>
+      `;
+      row.querySelector('.remove-item-btn').addEventListener('click', () => row.remove());
+      list.appendChild(row);
+    }
+    window.addGachaItemRow = addGachaItemRow; // ボタンのクリックハンドラから呼び出せるようにする
+
+    // カテゴリが「ガチャ」の時だけ、ガチャ専用の入力欄(開始・終了日時、ピックアップ一覧)を表示する
+    function updateGachaFieldsVisibility(){
+      const catEl = document.querySelector('#formGrid [data-field="cat"]');
+      const isGacha = catEl && catEl.value === 'gacha';
+      document.querySelectorAll('.gacha-only').forEach(el => {
+        el.style.display = isGacha ? '' : 'none';
+      });
+    }
+    const catSelectEl = document.querySelector('#formGrid [data-field="cat"]');
+    if (catSelectEl) catSelectEl.addEventListener('change', updateGachaFieldsVisibility);
+
+    document.getElementById('addGachaItemBtn').addEventListener('click', () => addGachaItemRow());
+
+    // 編集モードで、既存のピックアップ一覧があれば行を復元する
+    if (isEditing && editingItem.gachaItems) {
+      try {
+        const savedItems = JSON.parse(editingItem.gachaItems);
+        if (Array.isArray(savedItems)) savedItems.forEach(addGachaItemRow);
+      } catch (e) { /* 壊れたデータは無視する */ }
+    }
+    updateGachaFieldsVisibility();
+  }
+  // ▲ここまで追加 ============================================
+
   document.getElementById('submitBtn').addEventListener('click', async () => {
     const requiredKey = type.requiredKey || 'title';
     const formValues = {};
@@ -432,6 +504,15 @@ async function renderTabContent(){
       const label = (type.fields.find(f => f.key === requiredKey) || {}).label || requiredKey;
       showToast(`${label}を入力してください`);
       return;
+    }
+
+    // ガチャのピックアップ一覧を、名前が入力されている行だけ集めてformValuesに追加する
+    if (activeType === 'news') {
+      formValues.gachaItems = Array.from(document.querySelectorAll('#gachaItemsList .gacha-item-row')).map(row => ({
+        name: row.querySelector('.gacha-name').value.trim(),
+        rarity: row.querySelector('.gacha-rarity').value.trim(),
+        type: row.querySelector('.gacha-type').value.trim(),
+      })).filter(it => it.name);
     }
 
     if (activeType === 'manualChannels') {
