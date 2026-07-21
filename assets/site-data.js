@@ -114,6 +114,7 @@
           <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
         </div>
         <p class="news-title">${item.title}</p>
+        ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}
         <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
       </div>
       <div class="news-thumb" style="${thumbStyle(g)}">${gameIconTextHtml(g, 'icon-sm')}</div>
@@ -266,7 +267,26 @@
   }
   // ▲ここまで ============================================
 
+  // データベース(SQLite)由来の日時は「2026-07-20 12:34:56」のようにTを使わない形式で保存されているため、
+  // ブラウザによってはそのままDateに渡すと日付が正しく読み取れないことがある(NaN日前・Invalid Date)。
+  // ここでISO8601形式(Tとタイムゾーン付き)に変換しておく。
+  function normalizeDate(str){
+    if (!str) return str;
+    return String(str).includes('T') ? str : String(str).replace(' ', 'T') + 'Z';
+  }
+
+  // ガチャのピックアップ一覧(JSON文字列)を、配列に変換する。壊れている場合は空配列を返す。
+  function parseGachaItems(json){
+    try {
+      const arr = JSON.parse(json || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+
   // データベースの「news」の行を、ニュースカードがそのまま読める形に変換する
+  // 【重要】publishedAtは、サーバー側(src/index.js)のSQLで "published_at AS publishedAt" と
+  // 名前を付け替えて返しているため、ここでも row.publishedAt で受け取る必要がある
+  // (row.published_at ではデータが取得できず、日付が空になってしまう)。
   function mapNewsRow(row){
     return {
       id: row.id,
@@ -276,11 +296,71 @@
       title: row.title || '',
       summary: row.summary || '',
       url: row.url || '',
-      publishedAt: row.published_at,
+      publishedAt: normalizeDate(row.publishedAt),
+      gachaStart: normalizeDate(row.gachaStart),
+      gachaEnd: normalizeDate(row.gachaEnd),
+      gachaItems: parseGachaItems(row.gachaItems),
     };
   }
 
-  // データベース(D1)から、LIVE・動画の最新情報をまとめて取得する。
+  // ▼ここから追加：ガチャの「残り◯日」表示・ピックアップ表 ============================================
+
+  // 日時を "2026/08/21 04:00" のような表示用の文字列に変換する
+  function formatDateTimeLabel(dateStr){
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // ガチャの残り時間を計算する。
+  // 戻り値: { label:'残り3日'などの表示文字列, urgent: 赤字にすべきか, ended: 終了済みか } / gachaEndが無ければnull
+  //   ・残り24時間を切ったら「残り◯時間」表示に切り替える
+  //   ・残り3日以内、または残り24時間以内の場合は urgent:true (赤字表示用)
+  function gachaCountdownInfo(item){
+    if (!item || !item.gachaEnd) return null;
+    const endMs = new Date(item.gachaEnd).getTime();
+    if (isNaN(endMs)) return null;
+
+    const diffMs = endMs - Date.now();
+    if (diffMs <= 0) return { label: '終了', urgent: true, ended: true };
+
+    const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours <= 24) {
+      const hours = Math.max(1, Math.ceil(diffHours));
+      return { label: `残り${hours}時間`, urgent: true, ended: false };
+    }
+    const diffDays = Math.ceil(diffHours / 24);
+    return { label: `残り${diffDays}日`, urgent: diffDays <= 3, ended: false };
+  }
+
+  // 開催期間・残り時間をまとめたHTMLを返す(ニュース一覧のカード・記事詳細ページの両方で使う)
+  function gachaPeriodHtml(item){
+    const info = gachaCountdownInfo(item);
+    if (!info) return '';
+    const period = (item.gachaStart && item.gachaEnd)
+      ? `${formatDateTimeLabel(item.gachaStart)} 〜 ${formatDateTimeLabel(item.gachaEnd)}`
+      : '';
+    return `<div class="gacha-period-row${info.urgent ? ' gacha-urgent' : ''}">
+      ${period ? `<span class="gacha-period-range">${period}</span>` : ''}
+      <span class="gacha-period-remain">${info.label}</span>
+    </div>`;
+  }
+
+  // ピックアップ一覧を表(テーブル)のHTMLに変換する(記事詳細ページで使う)
+  function gachaItemsTableHtml(items){
+    if (!Array.isArray(items) || items.length === 0) return '';
+    const esc = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rows = items.map(it => `<tr>
+      <td>${esc(it.name)}</td><td>${esc(it.rarity)}</td><td>${esc(it.type)}</td>
+    </tr>`).join('');
+    return `<table class="gacha-items-table">
+      <thead><tr><th>名前</th><th>レアリティ</th><th>属性・武器種</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+  // ▲ここまで追加 ============================================
   // 取得したデータはcachedLive/cachedVideosに保存され、次にgetFilteredDataが呼ばれたときに使われる。
   // index.html / list.html の読み込み時に1回呼び出す想定(以前のYouTube直接取得版と同じ使い方です)。
   //
@@ -333,6 +413,7 @@
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
+    gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
   };
 })();
