@@ -59,6 +59,10 @@
   .summary-cell { max-width: 260px; overflow:hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 
   .table-wrap { overflow-x:auto; }
+  th:last-child, td:last-child {
+    position: sticky; right: 0; background: var(--surface);
+    box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15);
+  }
 
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
