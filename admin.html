@@ -470,7 +470,7 @@ async function renderTabContent(){
       const catEl = document.querySelector('#formGrid [data-field="cat"]');
       const isGacha = catEl && catEl.value === 'gacha';
       document.querySelectorAll('.gacha-only').forEach(el => {
-        el.style.display = isGacha ? '' : 'none';
+        el.style.display = isGacha ? 'block' : 'none';
       });
     }
     const catSelectEl = document.querySelector('#formGrid [data-field="cat"]');
