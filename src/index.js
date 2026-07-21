@@ -120,12 +120,18 @@ export default {
 
     // 窓口4-A:ニュース一覧を取得する(GET /api/news)
     // 「固定表示」を先頭、それ以外は投稿日の新しい順に並べて返す
+    // 通常は「公開済み(published)」のものだけを返す(サイト側の表示用)。
+    // 管理画面が下書きも含めて全件見たい場合は ?all=1 を付けて呼び出す。
     if (url.pathname === "/api/news" && request.method === "GET") {
       try {
+        const includeAll = url.searchParams.get("all") === "1";
+        const whereClause = includeAll ? "" : "WHERE COALESCE(status, 'published') = 'published'";
         const { results } = await env.DB.prepare(
           `SELECT id, game, cat, pinned, title, summary, url, published_at AS publishedAt,
-                  gacha_start AS gachaStart, gacha_end AS gachaEnd, gacha_items AS gachaItems
+                  gacha_start AS gachaStart, gacha_end AS gachaEnd, gacha_items AS gachaItems,
+                  COALESCE(status, 'published') AS status
            FROM news
+           ${whereClause}
            ORDER BY (pinned = 'pinned') DESC, published_at DESC`
         ).all();
         return jsonResponse(results);
@@ -136,10 +142,25 @@ export default {
 
     // 窓口4-B:ニュースを1件登録・更新する(POST /api/news)
     // body に id があれば既存記事の更新(投稿日時は変えない)、なければ新規登録として扱う
+    // 管理画面からの通常登録は、これまで通りすぐに「公開済み」として扱う
     if (url.pathname === "/api/news" && request.method === "POST") {
       try {
         const body = await request.json();
-        const result = await saveNewsItem(env.DB, body);
+        const result = await saveNewsItem(env.DB, { ...body, status: body.status || "published" });
+        return jsonResponse(result);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 400);
+      }
+    }
+
+    // 窓口4-B':下書きを1件登録する(POST /api/news/draft)
+    // Chrome拡張機能から、Xの投稿を「下書き」として送るための専用の窓口。
+    // タイトルなどが空でも受け付け、必ず status: 'draft' として保存する(サイトには表示されない)。
+    // 管理画面で内容を確認・編集し、「公開する」を押すまでは表に出ない。
+    if (url.pathname === "/api/news/draft" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const result = await saveNewsItem(env.DB, { ...body, status: "draft" });
         return jsonResponse(result);
       } catch (err) {
         return jsonResponse({ error: err.message }, 400);
@@ -353,12 +374,13 @@ export default {
 async function saveNewsItem(db, item) {
   // ガチャのピックアップ一覧は、配列のまま保存できないため、文字列(JSON)に変換して保存する
   const gachaItemsJson = JSON.stringify(Array.isArray(item.gachaItems) ? item.gachaItems : []);
+  const status = item.status === "draft" ? "draft" : "published";
 
   if (item.id) {
     await db
       .prepare(
         `UPDATE news SET game=?, cat=?, pinned=?, title=?, summary=?, url=?,
-                gacha_start=?, gacha_end=?, gacha_items=? WHERE id=?`
+                gacha_start=?, gacha_end=?, gacha_items=?, status=? WHERE id=?`
       )
       .bind(
         item.game || "",
@@ -370,6 +392,7 @@ async function saveNewsItem(db, item) {
         item.gachaStart || "",
         item.gachaEnd || "",
         gachaItemsJson,
+        status,
         item.id
       )
       .run();
@@ -380,8 +403,8 @@ async function saveNewsItem(db, item) {
   await db
     .prepare(
       `INSERT INTO news (id, game, cat, pinned, title, summary, url, published_at,
-              gacha_start, gacha_end, gacha_items)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)`
+              gacha_start, gacha_end, gacha_items, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -393,7 +416,8 @@ async function saveNewsItem(db, item) {
       item.url || "",
       item.gachaStart || "",
       item.gachaEnd || "",
-      gachaItemsJson
+      gachaItemsJson,
+      status
     )
     .run();
   return { id };

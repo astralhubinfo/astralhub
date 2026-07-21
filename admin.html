@@ -168,7 +168,7 @@ const TYPES = {
       { key:'gachaStart', label:'ガチャ開始日時（カテゴリ「ガチャ」の場合のみ）', type:'datetime-local', extraClass:'gacha-only' },
       { key:'gachaEnd', label:'ガチャ終了日時（カテゴリ「ガチャ」の場合のみ）', type:'datetime-local', extraClass:'gacha-only' },
     ],
-    columns: ['game','cat','pinned','title','summary','url','time'],
+    columns: ['status','game','cat','pinned','title','summary','url','time'],
   },
   manualChannels: {
     label: 'チャンネル登録（手動）',
@@ -286,9 +286,9 @@ async function apiDeleteChannel(channelId){
   return res.json();
 }
 
-// データベースからニュース一覧を取得する
+// データベースからニュース一覧を取得する(管理画面なので、下書きも含めて全件取得する)
 async function apiGetNews(){
-  const res = await fetch('/api/news');
+  const res = await fetch('/api/news?all=1');
   if (!res.ok) throw new Error('データベースからの取得に失敗しました');
   return res.json();
 }
@@ -402,6 +402,7 @@ async function renderTabContent(){
     const g = gameById(item.game);
     return `<tr>
       ${type.columns.map(col => {
+        if (col === 'status') return `<td>${item.status === 'draft' ? '<span class="swatch-tag" style="background:#9aa1ac">下書き</span>' : '<span class="swatch-tag" style="background:#1fae7a">公開済み</span>'}</td>`;
         if (col === 'game') return `<td><span class="swatch-tag" style="background:${g ? g.color : '#999'}">${g ? g.name : item.game}</span></td>`;
         if (col === 'cat') return `<td>${CATEGORY_LABEL[item.cat] || item.cat}</td>`;
         if (col === 'pinned') return `<td>${item.pinned === 'pinned' ? '<span class="swatch-tag" style="background:#e6a729">📌 固定</span>' : '－'}</td>`;
@@ -416,6 +417,7 @@ async function renderTabContent(){
         return `<td>${item[col] ?? ''}</td>`;
       }).join('')}
       <td style="white-space:nowrap;">
+        ${(activeType === 'news' && item.status === 'draft') ? `<button class="del-btn" data-publish-idx="${idx}" style="color:#1fae7a; border-color:#1fae7a; margin-right:4px;">公開する</button>` : ''}
         <button class="del-btn" data-edit-idx="${idx}" style="color:var(--accent); border-color:var(--accent); margin-right:4px;">編集</button>
         <button class="del-btn" data-idx="${idx}">削除</button>
       </td>
@@ -428,7 +430,7 @@ async function renderTabContent(){
       <div class="table-wrap">
         <table>
           <thead><tr>
-            ${type.columns.map(c => `<th>${({game:'ゲーム',cat:'カテゴリ',title:'タイトル',summary:'本文',url:'URL',time:'登録日時',channel:'チャンネル',viewers:'視聴者数',views:'再生数',duration:'長さ',platform:'プラットフォーム',language:'言語',blocked:'掲載可否',blockReason:'非掲載理由',channelId:'チャンネルID',label:'メモ・ラベル'})[c]}</th>`).join('')}
+            ${type.columns.map(c => `<th>${({status:'ステータス',game:'ゲーム',cat:'カテゴリ',pinned:'固定表示',title:'タイトル',summary:'本文',url:'URL',time:'登録日時',channel:'チャンネル',viewers:'視聴者数',views:'再生数',duration:'長さ',platform:'プラットフォーム',language:'言語',blocked:'掲載可否',blockReason:'非掲載理由',channelId:'チャンネルID',label:'メモ・ラベル'})[c]}</th>`).join('')}
             <th></th>
           </tr></thead>
           <tbody>${rows || `<tr class="empty-row"><td colspan="${type.columns.length+1}">まだ登録がありません</td></tr>`}</tbody>
@@ -596,6 +598,26 @@ async function renderTabContent(){
       editingIndex = Number(btn.dataset.editIdx);
       renderTabContent();
       document.querySelector('.panel')?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+
+  // 下書きの「公開する」ボタン:内容はそのまま、statusだけ公開済みに変えて保存する
+  document.querySelectorAll('.del-btn[data-publish-idx]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = Number(btn.dataset.publishIdx);
+      const target = items[idx];
+      if (!target) return;
+      // gachaItemsはデータベースからはJSON文字列のまま届くため、
+      // 配列に戻してから送らないと、公開時にピックアップ一覧が消えてしまう
+      let gachaItems = [];
+      try { gachaItems = JSON.parse(target.gachaItems || '[]'); } catch (e) { /* 空のまま */ }
+      try {
+        await apiSaveNews({ ...target, gachaItems, status: 'published' });
+        showToast('公開しました');
+        renderTabContent();
+      } catch (e) {
+        showToast(e.message || '公開に失敗しました');
+      }
     });
   });
 
