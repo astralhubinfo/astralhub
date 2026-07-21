@@ -348,17 +348,29 @@
     </div>`;
   }
 
-  // ピックアップ一覧を表(テーブル)のHTMLに変換する(記事詳細ページで使う)
+  // ピックアップ一覧を、キャラ枠・武器枠に分けた表(テーブル)のHTMLに変換する(記事詳細ページで使う)
   function gachaItemsTableHtml(items){
     if (!Array.isArray(items) || items.length === 0) return '';
     const esc = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const rows = items.map(it => `<tr>
+    const rowsHtml = (list) => list.map(it => `<tr>
       <td>${esc(it.name)}</td><td>${esc(it.rarity)}</td><td>${esc(it.type)}</td>
     </tr>`).join('');
-    return `<table class="gacha-items-table">
-      <thead><tr><th>名前</th><th>レアリティ</th><th>属性・武器種</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+
+    const characters = items.filter(it => it.kind !== 'weapon');
+    const weapons = items.filter(it => it.kind === 'weapon');
+
+    const block = (title, list, typeLabel) => {
+      if (list.length === 0) return '';
+      return `<div class="gacha-items-block">
+        <p class="gacha-items-block-title">${title}</p>
+        <table class="gacha-items-table">
+          <thead><tr><th>名前</th><th>レアリティ</th><th>${typeLabel}</th></tr></thead>
+          <tbody>${rowsHtml(list)}</tbody>
+        </table>
+      </div>`;
+    };
+
+    return block('キャラクター', characters, '属性') + block('武器', weapons, '武器種');
   }
   // ▲ここまで追加 ============================================
   // 取得したデータはcachedLive/cachedVideosに保存され、次にgetFilteredDataが呼ばれたときに使われる。

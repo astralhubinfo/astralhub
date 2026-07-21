@@ -72,6 +72,7 @@
   .gacha-only { display:none; }
   .gacha-item-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
   .gacha-item-row input { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
+  .gacha-item-row select.gacha-kind { flex:none; width:84px; padding: 9px 6px; border:1px solid var(--border); border-radius: var(--radius-sm); }
   .gacha-item-row .remove-item-btn {
     border:1px solid var(--border); background:var(--bg); color: var(--live); border-radius: var(--radius-sm);
     padding: 8px 11px; font-size:13px; flex:none;
@@ -449,12 +450,17 @@ async function renderTabContent(){
   // 1行=1体(1つ)のピックアップ。「＋」ボタンで自由に行を増やし、「✕」で削除できる。
   if (activeType === 'news') {
     function addGachaItemRow(item){
-      item = item || { name:'', rarity:'', type:'' };
+      item = item || { name:'', rarity:'', type:'', kind:'character' };
       const list = document.getElementById('gachaItemsList');
       const row = document.createElement('div');
       row.className = 'gacha-item-row';
       const esc = (s) => String(s || '').replace(/"/g, '&quot;');
+      const kind = item.kind === 'weapon' ? 'weapon' : 'character';
       row.innerHTML = `
+        <select class="gacha-kind">
+          <option value="character" ${kind==='character'?'selected':''}>キャラ</option>
+          <option value="weapon" ${kind==='weapon'?'selected':''}>武器</option>
+        </select>
         <input type="text" class="gacha-name" placeholder="名前（例：〇〇）" value="${esc(item.name)}">
         <input type="text" class="gacha-rarity" placeholder="レアリティ（例：★5、S）" value="${esc(item.rarity)}">
         <input type="text" class="gacha-type" placeholder="属性・武器種（例：炎、片手剣）" value="${esc(item.type)}">
@@ -509,6 +515,7 @@ async function renderTabContent(){
     // ガチャのピックアップ一覧を、名前が入力されている行だけ集めてformValuesに追加する
     if (activeType === 'news') {
       formValues.gachaItems = Array.from(document.querySelectorAll('#gachaItemsList .gacha-item-row')).map(row => ({
+        kind: row.querySelector('.gacha-kind').value,
         name: row.querySelector('.gacha-name').value.trim(),
         rarity: row.querySelector('.gacha-rarity').value.trim(),
         type: row.querySelector('.gacha-type').value.trim(),
