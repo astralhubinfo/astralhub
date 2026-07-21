@@ -249,9 +249,22 @@
       thumbnail: row.thumbnail_url || '',
       views: Number(row.view_count) || 0,
       duration: secondsToDurationLabel(row.duration_seconds),
+      durationSeconds: Number(row.duration_seconds) || 0,
       publishedAt: row.published_at,
     };
   }
+
+  // ▼「人気動画」ランキングに限って、短すぎる動画(実質ショート)を除外するための基準 ============
+  // ショート判定(サイト全体からの除外、75秒以下)とは別の仕組みです。
+  // ここで除外されても、動画自体は消えず「新着動画」には引き続き表示されます。
+  // 対象は一般投稿者の動画のみ(公式チャンネルの人気タブには適用しません)。
+  const MIN_POPULAR_DURATION_SECONDS = 150; // 2分30秒
+
+  // 「人気動画」ランキングの対象にしてよいかどうかを判定する
+  function isEligibleForPopular(item){
+    return (item.durationSeconds || 0) >= MIN_POPULAR_DURATION_SECONDS;
+  }
+  // ▲ここまで ============================================
 
   // データベースの「news」の行を、ニュースカードがそのまま読める形に変換する
   function mapNewsRow(row){
@@ -319,7 +332,7 @@
   window.ASTRA_DATA = {
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
-    getFilteredData, findNewsById,
+    getFilteredData, findNewsById, isEligibleForPopular,
     refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
   };
 })();

@@ -178,7 +178,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
@@ -310,7 +310,9 @@ function renderContent(){
     // 選んだ期間内に「投稿された」動画だけを対象に、再生数順で並べる
     const hoursMap = { '24': 24, '7': 24 * 7, '30': 24 * 30 };
     const cutoffMs = Date.now() - (hoursMap[popularRange] || 24) * 60 * 60 * 1000;
-    const filtered = generalVideos.filter(v => new Date(v.publishedAt).getTime() >= cutoffMs);
+    const filtered = generalVideos
+      .filter(v => new Date(v.publishedAt).getTime() >= cutoffMs)
+      .filter(isEligibleForPopular);
     const sorted = [...filtered].sort((a,b) => b.views - a.views);
     const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
     renderPaginatedGrid(el, sorted, videoCardHtml, `${rangeLabel}以内に投稿された動画がありません`, null, loading);

@@ -518,6 +518,7 @@ const {
   gameById, timeAgoLabel, emptyHtml, loadingHtml,
   liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
   getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
+  isEligibleForPopular,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -660,7 +661,7 @@ function filterByPopularRange(list, range){
 }
 
 function popularSectionHtml(list, loading){
-  const filtered = filterByPopularRange(list, popularRange);
+  const filtered = filterByPopularRange(list, popularRange).filter(isEligibleForPopular);
   const sorted = [...filtered].sort((a,b) => b.views - a.views);
   const rangeLabel = { '24': '24時間', '7': '7日間', '30': '30日間' }[popularRange] || '';
   return `<div class="panel" id="popular-section">
