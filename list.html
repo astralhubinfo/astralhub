@@ -358,7 +358,7 @@ function renderContent(){
           <option value="">すべてのゲーム</option>
           ${GAMES.map(g => `<option value="${g.id}" ${searchGameId===g.id?'selected':''}>${g.name}</option>`).join('')}
         </select>
-        <input type="text" id="searchKeywordInput" class="search-input" placeholder="キーワードを入力（動画タイトル）" value="${searchKeyword.replace(/"/g,'&quot;')}">
+        <input type="text" id="searchKeywordInput" class="search-input" placeholder="キーワードを入力（タイトル・チャンネル名／スペース区切りで複数指定可）" value="${searchKeyword.replace(/"/g,'&quot;')}">
         <button class="search-btn" id="searchSubmitBtn">検索</button>
       </div>
       <div class="pill-tabs">
@@ -380,15 +380,24 @@ function renderContent(){
     });
 
     if (!searchKeyword && !searchGameId) {
-      el.innerHTML = emptyHtml('キーワードを入力するか、ゲームを選んで「検索」を押してください（直近30日以内に取得した動画が対象です）');
+      el.innerHTML = emptyHtml('キーワードを入力するか、ゲームを選んで「検索」を押してください（動画タイトル・チャンネル名が対象、直近30日以内に取得した動画が対象です）');
       return;
     }
 
-    const kw = searchKeyword.toLowerCase();
+    // キーワードを空白（半角・全角どちらも）で区切って、複数の単語に分ける
+    // 例：「原神 サポカ」→ ['原神', 'サポカ'] という2つの単語として扱う
+    const kwList = searchKeyword.toLowerCase().split(/[\s\u3000]+/).filter(Boolean);
     const allVideos = [...officialVideos, ...generalVideos];
     let results = allVideos.filter(v => {
       if (searchGameId && v.game !== searchGameId) return false;
-      if (kw && !v.title.toLowerCase().includes(kw)) return false;
+      if (kwList.length > 0) {
+        const titleLower = v.title.toLowerCase();
+        const channelLower = (v.channel || '').toLowerCase();
+        // すべての単語について、「動画タイトル」か「チャンネル名」のどちらかに
+        // 含まれていればOK（単語同士はAND、タイトル・チャンネル名はOR）
+        const matchesAll = kwList.every(kw => titleLower.includes(kw) || channelLower.includes(kw));
+        if (!matchesAll) return false;
+      }
       return true;
     });
     results = searchSort === 'popular'
