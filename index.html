@@ -528,7 +528,27 @@ const {
 /* =========================================================
    2. 状態
    ========================================================= */
-let activeGames = new Set(GAMES.map(g => g.id));
+// ゲームフィルターの選択状態を保存・復元する ============================================
+// トップページで選んだ「どのゲームを表示するか」のチェック状態を覚えておき、
+// 次にページを開いた時も同じ状態で開けるようにする。
+function loadActiveGames(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.gameFilter);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr)) {
+      // config.js側でゲームが削除された場合に備え、今も存在するゲームIDだけを残す
+      const validIds = new Set(GAMES.map(g => g.id));
+      const filtered = arr.filter(id => validIds.has(id));
+      if (filtered.length > 0) return new Set(filtered);
+    }
+  } catch (e) { /* 保存できない/壊れている場合は既定値（すべて選択）を使う */ }
+  return new Set(GAMES.map(g => g.id));
+}
+function saveActiveGames(set){
+  try { localStorage.setItem(STORAGE_KEYS.gameFilter, JSON.stringify([...set])); } catch (e) { /* 無視 */ }
+}
+
+let activeGames = loadActiveGames();
 let popularRange = '24'; // 24 | 7 | 30
 let officialTab = 'latest'; // 'latest'（新着順）| 'popular'（人気＝7日間の再生数順）
 
@@ -631,12 +651,14 @@ function renderFilterBar(){
 
   document.querySelector('[data-all]').addEventListener('click', () => {
     activeGames = new Set(GAMES.map(g => g.id));
+    saveActiveGames(activeGames);
     renderAll();
   });
   document.querySelectorAll('#filterBar .game-chip[data-game]').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.game;
       if (activeGames.has(id)) activeGames.delete(id); else activeGames.add(id);
+      saveActiveGames(activeGames);
       renderAll();
     });
   });

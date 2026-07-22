@@ -90,6 +90,11 @@
     font-size: 13px; font-weight: 700; padding: 8px 18px;
   }
   .search-btn:hover { background: var(--accent-strong); }
+  .search-archive-toggle {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--text-secondary); white-space: nowrap;
+  }
+  .search-archive-toggle input { accent-color: var(--accent); }
 
   .pagination { display:flex; align-items:center; justify-content:center; gap:14px; margin: 24px 0 8px; }
   .page-btn {
@@ -155,7 +160,9 @@
 <header class="site-header">
   <div class="header-inner">
     <a class="logo" href="index.html"><img src="assets/logo.svg" alt="AstralHub"></a>
-    <a class="icon-btn" href="list.html?type=search" title="動画を検索" aria-label="動画を検索">🔍</a>
+    <a class="icon-btn" href="list.html?type=search" title="動画を検索" aria-label="動画を検索">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+    </a>
     <a class="back-link" href="index.html">← トップに戻る</a>
   </div>
   <div class="filter-bar-wrap">
@@ -208,6 +215,7 @@ let currentPage = 1;
 let searchKeyword = params.get('q') || '';
 let searchGameId = params.get('game') || '';
 let searchSort = 'latest'; // 'latest'（新着順）| 'popular'（人気＝再生数順）
+let searchIncludeArchive = false; // ライブアーカイブも検索対象に含めるかどうか
 
 // 一覧を件数で区切って表示し、下に「前へ／次へ」のページ送りを付ける共通処理
 function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass, loading){
@@ -293,8 +301,10 @@ function renderContent(){
 
   // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
   // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は「公式チャンネル」一覧にまとめる。
-  const officialVideos = videos.filter(v => v.isOfficial);
-  const generalVideos = videos.filter(v => !v.isOfficial);
+  // ライブアーカイブ（isArchive:true）は検索専用データのため、ここではあらかじめ除外しておく。
+  const nonArchiveVideos = videos.filter(v => !v.isArchive);
+  const officialVideos = nonArchiveVideos.filter(v => v.isOfficial);
+  const generalVideos = nonArchiveVideos.filter(v => !v.isOfficial);
 
   if (type === 'live') {
     subTabsEl.innerHTML = '';
@@ -360,6 +370,10 @@ function renderContent(){
         </select>
         <input type="text" id="searchKeywordInput" class="search-input" placeholder="キーワードを入力（タイトル・チャンネル名／スペース区切りで複数指定可）" value="${searchKeyword.replace(/"/g,'&quot;')}">
         <button class="search-btn" id="searchSubmitBtn">検索</button>
+        <label class="search-archive-toggle">
+          <input type="checkbox" id="searchArchiveCheckbox" ${searchIncludeArchive ? 'checked' : ''}>
+          ライブアーカイブも含める
+        </label>
       </div>
       <div class="pill-tabs">
         <button class="pill-tab ${searchSort==='latest'?'active':''}" data-search-sort="latest">新着順</button>
@@ -375,6 +389,11 @@ function renderContent(){
     document.getElementById('searchKeywordInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') document.getElementById('searchSubmitBtn').click();
     });
+    document.getElementById('searchArchiveCheckbox').addEventListener('change', (e) => {
+      searchIncludeArchive = e.target.checked;
+      currentPage = 1;
+      renderContent();
+    });
     document.querySelectorAll('.pill-tab[data-search-sort]').forEach(btn => {
       btn.addEventListener('click', () => { searchSort = btn.dataset.searchSort; currentPage = 1; renderContent(); });
     });
@@ -387,7 +406,8 @@ function renderContent(){
     // キーワードを空白（半角・全角どちらも）で区切って、複数の単語に分ける
     // 例：「原神 サポカ」→ ['原神', 'サポカ'] という2つの単語として扱う
     const kwList = searchKeyword.toLowerCase().split(/[\s\u3000]+/).filter(Boolean);
-    const allVideos = [...officialVideos, ...generalVideos];
+    // 「ライブアーカイブも含める」がオフの時は、アーカイブ（isArchive:true）を検索対象から除く
+    const allVideos = videos.filter(v => searchIncludeArchive || !v.isArchive);
     let results = allVideos.filter(v => {
       if (searchGameId && v.game !== searchGameId) return false;
       if (kwList.length > 0) {

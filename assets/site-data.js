@@ -98,7 +98,10 @@
         <span class="badge-duration">${item.duration}</span>
         ${thumbInner}
       </${thumbTag}>
-      <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
+      <div class="card-tag-row">
+        <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
+        ${item.isArchive ? '<span class="tag tag-cat">📼 アーカイブ</span>' : ''}
+      </div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
     </div>`;
@@ -237,6 +240,9 @@
   // データベースの「videos」の行を、動画カードがそのまま読める形に変換する
   // isOfficial: OFFICIAL_CHANNELSに登録されているチャンネルかどうかの目印。
   // これがtrueの動画は「人気動画」「新着動画」には出さず、「公式チャンネル」枠にのみ表示する(表示側の絞り込みで使用)。
+  // isArchive: サーバー側のvideo_typeが'archive'(配信が終わった後のアーカイブ)かどうかの目印。
+  // これがtrueの動画は「人気動画」「新着動画」「公式チャンネル」一覧には出さず、動画検索で
+  // 「アーカイブを含める」を選んだ時だけ表示する(表示側の絞り込みで使用)。
   function mapVideoRow(row){
     return {
       id: row.video_id,
@@ -244,6 +250,7 @@
       source: 'youtube-auto',
       channelId: row.channel_id,
       isOfficial: Object.prototype.hasOwnProperty.call(OFFICIAL_CHANNELS, row.channel_id),
+      isArchive: row.video_type === 'archive',
       url: 'https://www.youtube.com/watch?v=' + row.video_id,
       title: row.title || '',
       channel: row.channel_name || '',

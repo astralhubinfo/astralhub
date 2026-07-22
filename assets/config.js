@@ -122,5 +122,7 @@ window.ASTRA_CONFIG = {
     // config.js の YOUTUBE_CHANNELS と合わせて、自動取得の対象チャンネルとして扱われます。
     manualChannels: 'astra_data_manual_channels',
     sectionOrder: 'astra_section_order_list',
+    // トップページのゲームフィルター（どのゲームにチェックが入っているか）の保存先。
+    gameFilter: 'astra_game_filter',
   }
 };
