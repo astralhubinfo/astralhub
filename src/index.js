@@ -893,13 +893,29 @@ async function refreshLiveChannels(env) {
   }
 }
 
-// ③直近30日間に投稿された動画の再生回数を、まとめて更新する(人気動画ランキング用)
 // ③直近30日間に投稿された動画を、まとめて最新の状態に更新する
 // (再生数だけでなく、タイトル・サムネイルも取り直し、タイトルからゲーム判定もやり直す。
 //  投稿者があとからタイトルを訂正した場合や、判定不可になった場合にも自動で追従できるようにするため)
+//
+// ▼ここから追加:投稿からの経過日数によって、チェックする頻度を変える ============================================
+// 人気動画ランキングが「24時間」「7日間」「30日間」の3つの窓で分かれていることに合わせて、
+// 再チェックの頻度も次の3段階に分ける(APIの消費量を抑えるため)。
+//   Tier A（投稿から24時間以内）      : 今まで通り毎回チェック（30分ごと）
+//   Tier B（投稿から24時間〜7日以内） : 3時間に1回チェック
+//   Tier C（投稿から7日〜30日以内）   : 1日1回チェック
+// 「前回いつチェックしたか」は、既存の rescreened_at 列を使って判定する(新しい列の追加は不要)。
+// しきい値は、Cronの実行タイミングが多少ずれても取りこぼさないよう、少し短めに設定している。
+// ============================================================
 async function refreshRecentVideoStats(env) {
   const { results } = await env.DB.prepare(
-    "SELECT video_id, channel_id FROM videos WHERE published_at >= datetime('now', '-30 days') AND video_type != 'archive'"
+    `SELECT video_id, channel_id FROM videos
+     WHERE video_type != 'archive'
+       AND published_at >= datetime('now', '-30 days')
+       AND (
+         (published_at >= datetime('now', '-1 days') AND rescreened_at <= datetime('now', '-20 minutes'))
+         OR (published_at >= datetime('now', '-7 days') AND published_at < datetime('now', '-1 days') AND rescreened_at <= datetime('now', '-170 minutes'))
+         OR (published_at < datetime('now', '-7 days') AND rescreened_at <= datetime('now', '-1380 minutes'))
+       )`
   ).all();
   if (results.length === 0) return;
 
@@ -936,7 +952,7 @@ async function refreshRecentVideoStats(env) {
 
     updateStatements.push(
       env.DB.prepare(
-        `UPDATE videos SET title = ?, thumbnail_url = ?, game = ?, view_count = ?, updated_at = datetime('now')
+        `UPDATE videos SET title = ?, thumbnail_url = ?, game = ?, view_count = ?, rescreened_at = datetime('now'), updated_at = datetime('now')
          WHERE video_id = ?`
       ).bind(snippet.title || "", thumbnail, action.gameId, Number(statistics.viewCount) || 0, videoId)
     );
