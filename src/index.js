@@ -254,7 +254,7 @@ export default {
         const days = Number(url.searchParams.get("days")) || 30;
         const { results } = await env.DB.prepare(
           `SELECT v.video_id, v.channel_id, v.game, v.title, v.thumbnail_url,
-                  v.published_at, v.view_count, v.duration_seconds,
+                  v.published_at, v.view_count, v.duration_seconds, v.video_type,
                   c.channel_name
            FROM videos v
            LEFT JOIN channels c ON c.channel_id = v.channel_id
@@ -710,8 +710,11 @@ function parseIsoDuration(iso) {
 //   ①タイトルから実際にプレイ・紹介されているゲームを判定し、登録チャンネルのゲームと違っていても
 //     正しいゲームのタグに切り替える。どのゲームか判定できない内容(雑談動画など)は保存しない。
 //   ②ショート動画(60秒以内、または #shorts #ショート などのハッシュタグが付いた動画)を除外する。
-//   ③配信が終わったあとの「アーカイブ動画」・配信予定(プレミア公開待ちなど)は、
-//     動画一覧には出さない(LIVE中の間だけ表示する)。
+//   ③配信予定(プレミア公開待ちなど)・配信が終わった直後にYouTubeからの通知で届いたものは、
+//     この関数では保存しない(save:false)。
+//     ※配信アーカイブ自体は、この関数とは別に refreshLiveChannels() 内で
+//       「検索専用データ(video_type='archive')」として保存する仕組みを別途用意している
+//       (人気・新着・公式チャンネル一覧には出したくないため、あえてこの関数の対象外にしている)。
 // ============================================================
 
 const SHORT_VIDEO_MAX_SECONDS = 75; // これ以下の長さは、ショート動画とみなして除外する(1分15秒)
@@ -846,7 +849,43 @@ async function refreshLiveChannels(env) {
           .run();
       }
     } else {
-      // LIVEが終了した → is_liveを0にする(アーカイブは動画一覧には保存しません)
+      // LIVEが終了した
+      // ▼ここから追加:配信アーカイブを「検索専用」として videos テーブルに保存する ============
+      // 「人気動画」「新着動画」「公式チャンネル」一覧には出さず、動画検索でチェックを入れた時だけ
+      // 見つかる、という扱いにするため、video_type を 'archive' にして保存する。
+      // 通常動画と同じく、ショート判定(75秒以下除外・公式チャンネルはハッシュタグ判定のみ)と
+      // ゲーム判定(タイトルからゲーム名を判定できないものは保存しない)を行う。
+      const archiveDurationSeconds = parseIsoDuration((video.contentDetails || {}).duration || "");
+      const archiveIsOfficial = OFFICIAL_CHANNEL_IDS.has(row.channel_id);
+      if (!isShortVideo(snippet, archiveDurationSeconds, archiveIsOfficial)) {
+        const archiveGameId = classifyGameIdForItem(snippet.title || "");
+        if (archiveGameId) {
+          const archiveStatistics = video.statistics || {};
+          const archiveThumbnails = snippet.thumbnails || {};
+          const archiveThumbnail = (archiveThumbnails.medium || archiveThumbnails.high || archiveThumbnails.default || {}).url || "";
+          await env.DB.prepare(
+            `INSERT INTO videos (video_id, channel_id, game, title, thumbnail_url, video_type, published_at, view_count, duration_seconds, rescreened_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'archive', ?, ?, ?, datetime('now'), datetime('now'))
+             ON CONFLICT(video_id) DO UPDATE SET
+               game=excluded.game, title=excluded.title, thumbnail_url=excluded.thumbnail_url,
+               view_count=excluded.view_count, duration_seconds=excluded.duration_seconds,
+               video_type=excluded.video_type, rescreened_at=datetime('now'), updated_at=datetime('now')`
+          )
+            .bind(
+              row.live_video_id,
+              row.channel_id,
+              archiveGameId,
+              snippet.title || "",
+              archiveThumbnail,
+              snippet.publishedAt || "",
+              Number(archiveStatistics.viewCount) || 0,
+              archiveDurationSeconds
+            )
+            .run();
+        }
+      }
+      // ▲ここまで追加 ============================================
+      // is_liveを0にする
       await env.DB.prepare("UPDATE live_status SET is_live = 0 WHERE channel_id = ?")
         .bind(row.channel_id)
         .run();
@@ -860,7 +899,7 @@ async function refreshLiveChannels(env) {
 //  投稿者があとからタイトルを訂正した場合や、判定不可になった場合にも自動で追従できるようにするため)
 async function refreshRecentVideoStats(env) {
   const { results } = await env.DB.prepare(
-    "SELECT video_id, channel_id FROM videos WHERE published_at >= datetime('now', '-30 days')"
+    "SELECT video_id, channel_id FROM videos WHERE published_at >= datetime('now', '-30 days') AND video_type != 'archive'"
   ).all();
   if (results.length === 0) return;
 
