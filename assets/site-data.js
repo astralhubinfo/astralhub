@@ -199,6 +199,7 @@
   let cachedLive = null;
   let cachedVideos = null;
   let cachedNews = null;
+  let cachedSchedule = null; // 公式チャンネルの配信予定
 
   // サーバー(Cloudflare Workers)のAPIから、JSON形式のデータを取得する共通処理
   async function apiFetchJson(path){
@@ -260,6 +261,25 @@
       durationSeconds: Number(row.duration_seconds) || 0,
       publishedAt: row.published_at,
     };
+  }
+
+  // データベースの「official_schedule」の行を、予定表示用のデータに変換する
+  function mapScheduleRow(row){
+    return {
+      id: row.video_id,
+      game: row.game,
+      channelId: row.channel_id,
+      channel: row.channel_name || '',
+      url: 'https://www.youtube.com/watch?v=' + row.video_id,
+      title: row.title || '',
+      thumbnail: row.thumbnail_url || '',
+      scheduledStartTime: normalizeDate(row.scheduled_start_time),
+    };
+  }
+
+  // 配信予定の一覧を、開始時刻が近い順に並べ替える(サーバー側でも並べているが、念のため)
+  function sortScheduleForDisplay(list){
+    return [...list].sort((a, b) => new Date(a.scheduledStartTime) - new Date(b.scheduledStartTime));
   }
 
   // ▼「人気動画」ランキングに限って、短すぎる動画(実質ショート)を除外するための基準 ============
@@ -380,6 +400,58 @@
     return block('キャラクター', characters, '属性') + block('武器', weapons, '武器種');
   }
   // ▲ここまで追加 ============================================
+
+  // ▼ここから追加:公式チャンネルの配信予定まわり ============================================
+  // 開始2時間前(前後1時間)を「目立たせるべきタイミング」とする。
+  const SCHEDULE_IMMINENT_MS = 2 * 60 * 60 * 1000; // 2時間
+
+  // 「配信予定」を表す時計アイコン(絵文字は環境によって表示が崩れるため、線画のSVGアイコンを使う)
+  const SCHEDULE_CLOCK_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+
+  // 配信予定の状態を計算する。
+  // 戻り値: { dateTimeLabel:'2026/07/25 20:00'などの表示文字列, diffMs: 開始までのミリ秒(マイナスなら開始済み), imminent: 目立たせるべきか } / 予定時刻が無ければnull
+  function scheduleCountdownInfo(item){
+    if (!item || !item.scheduledStartTime) return null;
+    const startMs = new Date(item.scheduledStartTime).getTime();
+    if (isNaN(startMs)) return null;
+    const diffMs = startMs - Date.now();
+    return {
+      dateTimeLabel: formatDateTimeLabel(item.scheduledStartTime),
+      diffMs,
+      imminent: diffMs <= SCHEDULE_IMMINENT_MS,
+    };
+  }
+
+  // ヘッダー付近のお知らせ欄に出す、1件分のHTML(index.htmlで横に並べて使う想定)
+  function scheduleAnnounceHtml(item){
+    const g = gameById(item.game);
+    const info = scheduleCountdownInfo(item);
+    if (!g || !info) return '';
+    return `<a class="schedule-announce-item" href="${item.url}" target="_blank" rel="noopener noreferrer">
+      <span class="game-icon-text icon-sm" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
+      <span class="schedule-announce-text">${SCHEDULE_CLOCK_ICON_SVG} ${info.dateTimeLabel}〜 ${g.name}公式で配信予定</span>
+    </a>`;
+  }
+
+  // LIVE一覧で目立たせる用の「まもなく配信」カードのHTML(liveCardHtmlと同じ見た目の型を使う)
+  function scheduleCardHtml(item){
+    const g = gameById(item.game);
+    const info = scheduleCountdownInfo(item);
+    const thumbInner = item.thumbnail
+      ? `<img class="media-thumb-img" src="${item.thumbnail}" alt="">`
+      : gameIconTextHtml(g, 'icon-md');
+    return `<a class="media-card schedule-card" href="${item.url}" target="_blank" rel="noopener noreferrer">
+      <div class="media-thumb landscape" style="${thumbStyle(g)}">
+        <span class="badge-viewers badge-schedule">${SCHEDULE_CLOCK_ICON_SVG} ${info ? info.dateTimeLabel : ''}</span>
+        ${thumbInner}
+      </div>
+      <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
+      <p class="card-title">${item.title}</p>
+      <div class="card-meta"><span>${item.channel}</span></div>
+    </a>`;
+  }
+  // ▲ここまで追加 ============================================
+
   // 取得したデータはcachedLive/cachedVideosに保存され、次にgetFilteredDataが呼ばれたときに使われる。
   // index.html / list.html の読み込み時に1回呼び出す想定(以前のYouTube直接取得版と同じ使い方です)。
   //
@@ -428,11 +500,31 @@
     }
   }
 
+  // データベース(D1)から、公式チャンネルの配信予定を取得する。
+  // index.html / list.html の読み込み時に1回呼び出す想定(LIVE・動画と同じ扱い)。
+  async function refreshScheduleData(){
+    try {
+      const rows = await apiFetchJson('/api/schedule');
+      cachedSchedule = sortScheduleForDisplay(rows.map(mapScheduleRow));
+      return true;
+    } catch (e) {
+      console.error('[AstralHub] 配信予定の取得に失敗しました', e);
+      cachedSchedule = cachedSchedule || [];
+      return false;
+    }
+  }
+
+  // 現在キャッシュしている配信予定の一覧を返す(まだ一度も取得できていない場合は空配列)
+  function getScheduleData(){
+    return cachedSchedule !== null ? cachedSchedule : [];
+  }
+
   window.ASTRA_DATA = {
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
+    refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
   };
 })();

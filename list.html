@@ -113,8 +113,11 @@
     aspect-ratio: 16/9;
   }
   .media-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .badge-viewers { position:absolute; top:7px; left:7px; background: rgba(226,61,61,0.92); color:#fff; font-family: var(--font-mono); font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px; display:flex; align-items:center; gap:4px; }
-  .badge-duration { position:absolute; right:6px; bottom:6px; background: rgba(0,0,0,0.72); color:#fff; font-family: var(--font-mono); font-size:10.5px; padding:1px 5px; border-radius:3px; }
+  .badge-viewers { position:absolute; top:7px; left:7px; z-index:2; background: rgba(226,61,61,0.92); color:#fff; font-family: var(--font-mono); font-size:11px; font-weight:700; padding:3px 7px; border-radius:5px; display:flex; align-items:center; gap:4px; }
+  .badge-duration { position:absolute; right:6px; bottom:6px; z-index:2; background: rgba(0,0,0,0.72); color:#fff; font-family: var(--font-mono); font-size:10.5px; padding:1px 5px; border-radius:3px; }
+  /* まもなく配信カード:黄色い縁取り + オレンジ系バッジで、配信中カードと区別する */
+  .schedule-card .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
+  .badge-schedule { background: rgba(180, 83, 9, 0.92) !important; }
   .game-icon-text {
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-weight: 900; text-align: center; line-height: 1;
@@ -189,7 +192,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular, getScheduleData, scheduleCountdownInfo, scheduleCardHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
@@ -308,7 +311,16 @@ function renderContent(){
 
   if (type === 'live') {
     subTabsEl.innerHTML = '';
-    el.innerHTML = `<div class="card-grid">${live.length ? live.map(liveCardHtml).join('') : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'))}</div>`;
+    // 開始2時間以内(imminent)の公式配信予定を、LIVEカードの先頭に混ぜて表示する
+    const imminentSchedule = getScheduleData().filter(item => {
+      const info = scheduleCountdownInfo(item);
+      return info && info.imminent;
+    });
+    const hasAny = imminentSchedule.length > 0 || live.length > 0;
+    const gridInner = hasAny
+      ? (imminentSchedule.map(scheduleCardHtml).join('') + live.map(liveCardHtml).join(''))
+      : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'));
+    el.innerHTML = `<div class="card-grid">${gridInner}</div>`;
     return;
   }
 
@@ -495,15 +507,26 @@ function fetchNewsAndRenderList(){
     console.error('[AstralHub] ニュースの自動取得でエラーが発生しました', e);
   });
 }
+// 配信予定は、LIVEと同じくらいの鮮度が必要なため、同じ間隔(2分ごと)で取得する
+function fetchScheduleAndRenderList(){
+  if (!window.ASTRA_DATA.refreshScheduleData) return;
+  window.ASTRA_DATA.refreshScheduleData().then(() => {
+    renderAll();
+  }).catch(e => {
+    console.error('[AstralHub] 配信予定の自動取得でエラーが発生しました', e);
+  });
+}
 fetchYouTubeAndRenderList();
 fetchNewsAndRenderList();
+fetchScheduleAndRenderList();
 
 const LIVE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 setInterval(() => { if (!document.hidden) fetchYouTubeAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchNewsAndRenderList(); }, NEWS_REFRESH_INTERVAL_MS);
+setInterval(() => { if (!document.hidden) fetchScheduleAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) { fetchYouTubeAndRenderList(); fetchNewsAndRenderList(); }
+  if (!document.hidden) { fetchYouTubeAndRenderList(); fetchNewsAndRenderList(); fetchScheduleAndRenderList(); }
 });
 </script>
 </body>

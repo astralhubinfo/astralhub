@@ -269,6 +269,22 @@ export default {
       }
     }
 
+    // 窓口6.5:公式チャンネルの配信予定一覧を取得する(GET /api/schedule)
+    if (url.pathname === "/api/schedule" && request.method === "GET") {
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT os.video_id, os.channel_id, os.game, os.title, os.thumbnail_url,
+                  os.scheduled_start_time, c.channel_name
+           FROM official_schedule os
+           LEFT JOIN channels c ON c.channel_id = os.channel_id
+           ORDER BY os.scheduled_start_time ASC`
+        ).all();
+        return jsonResponse(results);
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // 窓口7:キーワードを1つ検索し、見つかったチャンネルを「審査待ちの箱」に入れる(POST /api/discover/search)
     // body例: { "gameId": "genshin", "keyword": "原神", "minSubscribers": 300, "secondaryKeywords": ["確率炉"], "streamOnly": true }
     // ※1回あたりの通信量を抑えるため、検索だけを行い、詳しい審査は次の窓口(8)で小分けに行います
@@ -413,9 +429,10 @@ export default {
   // ============================================================
   async scheduled(controller, env, ctx) {
     if (controller.cron === "*/5 * * * *") {
-      // 5分ごと:①通知期限が近いチャンネルの更新 ②LIVE中チャンネルの再確認
+      // 5分ごと:①通知期限が近いチャンネルの更新 ②LIVE中チャンネルの再確認 ③公式配信予定の巡回チェック
       ctx.waitUntil(renewExpiringSubscriptions(env));
       ctx.waitUntil(refreshLiveChannels(env));
+      ctx.waitUntil(refreshOfficialSchedule(env));
     } else if (controller.cron === "*/30 * * * *") {
       // 30分ごと:人気動画の再生回数まとめ更新
       ctx.waitUntil(refreshRecentVideoStats(env));
@@ -651,6 +668,16 @@ async function fetchAndStoreVideo(videoId, channelId, env) {
   const video = data.items && data.items[0];
   if (!video) return;
 
+  // ▼ここから追加:公式チャンネルの「配信予定」を検知して保存する ============================================
+  // 配信予約をした直後は、YouTube側からの通知でこの関数が呼ばれるが、その時点ではまだ
+  // 配信が始まっていない(snippet.liveBroadcastContent === "upcoming")。
+  // 公式チャンネルの予定だけを対象に、通常の動画/配信判定(resolveVideoAction)より先に処理する。
+  if (video.snippet && video.snippet.liveBroadcastContent === "upcoming" && OFFICIAL_CHANNEL_IDS.has(channelId)) {
+    await saveOfficialSchedule(video, channelId, env);
+    return;
+  }
+  // ▲ここまで追加 ============================================
+
   const action = resolveVideoAction(video, channelId);
   if (!action.save) return; // ショート動画・配信アーカイブ・ゲーム判定不可のいずれかのため保存しない
 
@@ -694,6 +721,112 @@ async function fetchAndStoreVideo(videoId, channelId, env) {
     )
     .run();
 }
+
+// ▼ここから追加:公式チャンネルの配信予定まわりの共通処理 ============================================
+
+// チャンネルIDから、登録時に指定されたゲームIDを調べる(タイトルからゲーム判定できない時の保険用)
+async function lookupChannelGame(channelId, env) {
+  const row = await env.DB.prepare("SELECT game FROM channels WHERE channel_id = ?").bind(channelId).first();
+  return row ? row.game : null;
+}
+
+// 配信予定(まだ始まっていないもの)を、official_scheduleテーブルに保存する
+async function saveOfficialSchedule(video, channelId, env) {
+  const snippet = video.snippet || {};
+  const liveDetails = video.liveStreamingDetails || {};
+  const scheduledStartTime = liveDetails.scheduledStartTime || "";
+  if (!scheduledStartTime) return; // 予定時刻が取れない場合は保存しない(表示のしようがないため)
+
+  // タイトルからゲームを判定できない場合(例:「本日20時から配信します」のようなタイトル)は、
+  // そのチャンネルを登録した時に指定したゲームを使う
+  let gameId = classifyGameIdForItem(snippet.title || "");
+  if (!gameId) {
+    gameId = await lookupChannelGame(channelId, env);
+  }
+  if (!gameId) return; // どちらでも判定できなければ保存しない
+
+  const thumbnails = snippet.thumbnails || {};
+  const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+
+  await env.DB.prepare(
+    `INSERT INTO official_schedule (video_id, channel_id, game, title, thumbnail_url, scheduled_start_time, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(video_id) DO UPDATE SET
+       game=excluded.game, title=excluded.title, thumbnail_url=excluded.thumbnail_url,
+       scheduled_start_time=excluded.scheduled_start_time, updated_at=datetime('now')`
+  )
+    .bind(video.id, channelId, gameId, snippet.title || "", thumbnail, scheduledStartTime)
+    .run();
+}
+
+// 配信予定の一覧を巡回し、①配信が始まったものはlive_statusへ昇格、②中止・変更等で予定時刻を
+// 1時間以上過ぎても始まらないものは削除する(5分ごとのCronから呼び出す)
+async function refreshOfficialSchedule(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT video_id, channel_id FROM official_schedule"
+  ).all();
+  if (results.length === 0) return;
+
+  const videoIds = results.map(r => r.video_id);
+  const videoMap = await fetchVideosBatched(videoIds, env);
+  const deleteIds = [];
+
+  for (const row of results) {
+    const video = videoMap[row.video_id];
+    if (!video) {
+      // YouTube側で削除・非公開になっている → 予定から取り除く
+      deleteIds.push(row.video_id);
+      continue;
+    }
+
+    const snippet = video.snippet || {};
+    const liveDetails = video.liveStreamingDetails || {};
+
+    if (snippet.liveBroadcastContent === "live") {
+      // 配信が始まった → live_statusに登録し、予定からは削除する
+      let gameId = classifyGameIdForItem(snippet.title || "");
+      if (!gameId) gameId = await lookupChannelGame(row.channel_id, env);
+      if (gameId) {
+        const thumbnails = snippet.thumbnails || {};
+        const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+        await env.DB.prepare(
+          `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, game, updated_at)
+           VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(channel_id) DO UPDATE SET
+             is_live=1, live_video_id=excluded.live_video_id, title=excluded.title,
+             thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count,
+             game=excluded.game, updated_at=datetime('now')`
+        )
+          .bind(row.channel_id, row.video_id, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0, gameId)
+          .run();
+      }
+      deleteIds.push(row.video_id);
+      continue;
+    }
+
+    if (snippet.liveBroadcastContent !== "upcoming") {
+      // 予定でも配信中でもなくなっている(中止など) → 予定から取り除く
+      deleteIds.push(row.video_id);
+      continue;
+    }
+
+    // まだ予定のまま。予定時刻を1時間以上過ぎていたら、中止・延期とみなして取り除く
+    const scheduledMs = new Date(liveDetails.scheduledStartTime || "").getTime();
+    if (scheduledMs && (Date.now() - scheduledMs) > 60 * 60 * 1000) {
+      deleteIds.push(row.video_id);
+    }
+  }
+
+  if (deleteIds.length > 0) {
+    await env.DB.prepare(
+      `DELETE FROM official_schedule WHERE video_id IN (${deleteIds.map(() => "?").join(",")})`
+    )
+      .bind(...deleteIds)
+      .run();
+  }
+}
+// ▲ここまで追加 ============================================
+
 
 function parseIsoDuration(iso) {
   const match = iso.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
