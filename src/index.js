@@ -114,6 +114,59 @@ export default {
       }
     }
 
+    // 窓口4.5:登録チャンネルの整合性をチェックする(GET /api/channels/verify)
+    // ※チャンネルIDの取り違え(拡張機能が違うチャンネルのIDを拾ってしまった等)を見つけるための機能。
+    //   登録されている全チャンネルについて、YouTube側の「本当の名前」を問い合わせて、
+    //   サイトに保存されている名前と食い違っているもの・そもそも見つからないものだけを返す。
+    if (url.pathname === "/api/channels/verify" && request.method === "GET") {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT channel_id, channel_name, game FROM channels"
+        ).all();
+
+        if (results.length === 0) {
+          return jsonResponse({ checked: 0, problems: [] });
+        }
+
+        const channelIds = results.map(r => r.channel_id);
+        const channelDetails = await fetchChannelDetailsBatched(channelIds, env);
+        const detailsMap = new Map(channelDetails.map(ch => [ch.id, ch]));
+
+        const problems = [];
+        for (const row of results) {
+          const ch = detailsMap.get(row.channel_id);
+
+          if (!ch) {
+            // YouTube側に見つからない(IDが間違っている・削除された・非公開になった等)
+            problems.push({
+              channel_id: row.channel_id,
+              game: row.game,
+              savedName: row.channel_name,
+              actualName: null,
+              reason: "not_found",
+            });
+            continue;
+          }
+
+          const actualName = (ch.snippet && ch.snippet.title) || "";
+          // 登録時に名前が空だったものは比較のしようがないため、対象外にする
+          if (row.channel_name && actualName && row.channel_name !== actualName) {
+            problems.push({
+              channel_id: row.channel_id,
+              game: row.game,
+              savedName: row.channel_name,
+              actualName,
+              reason: "name_mismatch",
+            });
+          }
+        }
+
+        return jsonResponse({ checked: results.length, problems });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 2.5 ニュース記事の受付窓口(API) =====
     // ※以前はブラウザのlocalStorageだけに保存していましたが、それだと管理人本人以外には
     //   一切表示されなかったため、チャンネル・動画・配信と同じくデータベース(D1)に保存する形にしました。
