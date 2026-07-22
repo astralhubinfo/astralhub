@@ -887,8 +887,8 @@ function renderDiscoverTab(){
       <h2>新しい候補を自動で探す</h2>
       <p class="hint">
         対象ゲームを選んで「候補を探す」を押すと、サーバーがYouTubeを検索し、
-        「指定した登録者数以上」「直近の投稿の3割以上がそのゲーム」「直近1ヶ月以内に関連動画を投稿」
-        「直近の投稿の5割以上が日本語(ひらがな・カタカナを含む)」
+        「指定した登録者数以上」「直近30日以内に、ゲーム関連の動画が1本以上」
+        「その関連動画のうち、日本語(ひらがな・カタカナを含む)のものが1本以上」
         の基準をすべて満たすチャンネルだけを、下の審査待ちリストに自動で追加します。<br>
         ※1回の検索でAPIの利用量をまとめて消費します（1ゲームあたり数分かかることがあります）。
       </p>
@@ -942,9 +942,9 @@ function renderDiscoverTab(){
         </div>
       </div>
       <div style="margin-bottom:12px;">
-        <button class="del-btn" id="discoverRescreenBtn">日本語率が未計算の古い候補を再チェックする</button>
+        <button class="del-btn" id="discoverRescreenBtn">却下済み候補を今の基準で見直す</button>
         <p class="hint" style="margin-top:6px;">
-          「候補を探す」機能に日本語の絞り込みを追加する前に見つかっていた候補を、今の基準（登録者数・関連度・日本語率）で洗い直し、基準を満たさないものを自動で却下します。
+          以前は基準未達で却下されたチャンネルを、今の基準（登録者数・関連動画の本数・日本語）で見直します。基準を満たすようになっていれば、審査待ちに戻します。
         </p>
       </div>
       <div id="discoverResultsList" class="discover-list"></div>
@@ -987,6 +987,17 @@ function updateDiscoverHeading(){
   if (heading) heading.textContent = `${label}（${discoverCandidates.length}件）`;
 }
 
+function rejectReasonText(reason){
+  const map = {
+    low_subscribers: '登録者数が最低基準に届きませんでした',
+    not_found_on_youtube: 'YouTube側でこのチャンネルが見つかりませんでした',
+    no_uploads_playlist: '投稿動画の情報が取得できませんでした',
+    not_enough_related_videos: '直近30日以内に、ゲーム関連の動画が見つかりませんでした',
+    not_enough_japanese: '関連動画はありましたが、日本語のものが見つかりませんでした',
+  };
+  return map[reason] || '基準を満たしませんでした';
+}
+
 function renderDiscoverResultsList(){
   const wrap = document.getElementById('discoverResultsList');
   if (!wrap) return;
@@ -1000,8 +1011,12 @@ function renderDiscoverResultsList(){
   wrap.innerHTML = discoverCandidates.map(c => {
     const g = gameById(c.game_id);
     const lastDate = c.last_related_video_at ? new Date(c.last_related_video_at).toLocaleDateString('ja-JP') : '不明';
-    const relevancePercent = Math.round((c.relevance_score || 0) * 100);
-    const japanesePercent = Math.round((c.japanese_ratio || 0) * 100);
+    const relatedCount = c.relevance_score || 0; // 直近30日以内の関連動画の本数
+    const relatedJapaneseCount = c.japanese_ratio || 0; // ↑のうち日本語(かな含有)の本数
+    const metaLine = `登録者 ${(c.subscriber_count || 0).toLocaleString()}人 ／ 関連動画 ${relatedCount}本（うち日本語 ${relatedJapaneseCount}本）／ 直近の関連動画：${lastDate}`;
+    const reasonLine = (!isPending && c.reject_reason)
+      ? `<span class="discover-meta" style="color:var(--live);">⚠ 却下理由：${rejectReasonText(c.reject_reason)}</span>`
+      : '';
     const actionsHtml = isPending
       ? `<button class="submit-btn" data-approve="${c.channel_id}" style="padding:7px 12px;">採用する</button>
          <button class="del-btn" data-reject="${c.channel_id}">却下する</button>`
@@ -1013,10 +1028,11 @@ function renderDiscoverResultsList(){
       </a>
       <span class="discover-info" style="flex:1;">
         <span class="discover-name">
-          <a href="https://www.youtube.com/channel/${c.channel_id}" target="_blank" rel="noopener" style="color:inherit; text-decoration:none;">${c.channel_name} ↗</a>
+          <a href="https://www.youtube.com/channel/${c.channel_id}" target="_blank" rel="noopener" style="color:inherit; text-decoration:none;">${c.channel_name || '(名前未取得)'} ↗</a>
           <span class="swatch-tag" style="background:${g ? g.color : '#999'}; margin-left:6px;">${g ? g.name : c.game_id}</span>
         </span>
-        <span class="discover-meta">登録者 ${(c.subscriber_count || 0).toLocaleString()}人 ／ 関連度 ${relevancePercent}% ／ 日本語率 ${japanesePercent}% ／ 直近の関連動画：${lastDate}</span>
+        <span class="discover-meta">${metaLine}</span>
+        ${reasonLine}
         <span class="discover-id">${c.channel_id}</span>
       </span>
       <div style="display:flex; gap:6px; flex-shrink:0;">
@@ -1115,12 +1131,18 @@ async function handleDiscoverSearch(){
   }
 }
 
-// 「日本語率が未計算の古い候補」を、箱が空になるまで少しずつ再チェックする
-async function apiRescreenBatch(){
-  const res = await fetch('/api/candidates/rescreen', { method: 'POST' });
+// 却下済み候補を、箱が空になるまで少しずつ見直す
+// ※beforeは「見直し作業を始めた時刻」。ずっと同じ時刻を使い続けることで、
+//   すでに見直したチャンネルを何度も処理してしまう(処理が終わらなくなる)のを防いでいる。
+async function apiRescreenBatch(before){
+  const res = await fetch('/api/candidates/rescreen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ before }),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || '再チェックに失敗しました');
+    throw new Error(err.error || '見直しに失敗しました');
   }
   return res.json();
 }
@@ -1128,28 +1150,29 @@ async function apiRescreenBatch(){
 async function handleDiscoverRescreen(){
   const btn = document.getElementById('discoverRescreenBtn');
   btn.disabled = true;
+  const before = new Date().toISOString(); // 見直し作業を始めた時刻を固定しておく
 
   try {
     let totalKept = 0;
     let totalRejected = 0;
     let remaining = 1;
     while (remaining > 0) {
-      btn.textContent = `再チェック中…（残り約${remaining}件）`;
-      const r = await apiRescreenBatch();
+      btn.textContent = `見直し中…（残り約${remaining}件）`;
+      const r = await apiRescreenBatch(before);
       totalKept += r.kept || 0;
       totalRejected += r.rejected || 0;
       remaining = r.remaining || 0;
       if (!r.processed) break; // 念のための安全装置(無限ループ防止)
     }
 
-    showToast(`再チェック完了：${totalKept}件が基準を満たして残り、${totalRejected}件を却下しました`);
+    showToast(`見直し完了：${totalKept}件が基準を満たして審査待ちに戻り、${totalRejected}件は却下のままでした`);
     await loadPendingCandidates();
   } catch (e) {
-    console.error('[AstralHub] 候補の再チェックに失敗しました', e);
-    showToast(e.message || '再チェックに失敗しました');
+    console.error('[AstralHub] 候補の見直しに失敗しました', e);
+    showToast(e.message || '見直しに失敗しました');
   } finally {
     btn.disabled = false;
-    btn.textContent = '日本語率が未計算の古い候補を再チェックする';
+    btn.textContent = '却下済み候補を今の基準で見直す';
   }
 }
 // ▲ここまで追加 ============================================
