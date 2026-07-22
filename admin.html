@@ -208,6 +208,8 @@ const TYPES = {
 
 let activeType = 'news';
 let editingIndex = null; // nullなら新規登録モード、数値なら編集モード（そのインデックスの項目を編集中）
+let sortModeByType = {}; // タブごとの並び替え設定を覚えておく（'default' または 'game'）
+let channelProblems = null; // 「チャンネルをチェックする」の結果（null:未チェック、配列:チェック済み）
 
 function storageKeyFor(type){
   if (type === 'news') return STORAGE_KEYS.news;
@@ -280,6 +282,13 @@ async function apiSaveChannel(item){
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || '登録に失敗しました（同じチャンネルIDがすでに登録されている可能性があります）');
   }
+  return res.json();
+}
+
+// 登録済みチャンネルの整合性をチェックする（名前の食い違い・チャンネルIDの取り違えなどを探す）
+async function apiVerifyChannels(){
+  const res = await fetch('/api/channels/verify');
+  if (!res.ok) throw new Error('チェックに失敗しました');
   return res.json();
 }
 
@@ -381,6 +390,16 @@ async function renderTabContent(){
   } else {
     items = loadItems(activeType);
   }
+  // ▼並び替え：「ゲーム」列を持つ一覧は、選択中の並び替え設定に応じて並び替える
+  if (type.columns.includes('game') && (sortModeByType[activeType] || 'default') === 'game') {
+    const gameOrder = GAMES.map(g => g.id);
+    items = [...items].sort((a, b) => {
+      const ai = gameOrder.indexOf(a.game);
+      const bi = gameOrder.indexOf(b.game);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  }
+
   const isEditing = editingIndex !== null && items[editingIndex];
   const editingItem = isEditing ? items[editingIndex] : null;
 
@@ -428,9 +447,55 @@ async function renderTabContent(){
     </tr>`;
   }).join('');
 
+  const problemsHtml = (activeType === 'manualChannels' && channelProblems !== null) ? `
+    <div class="panel">
+      <h2>チェック結果</h2>
+      ${channelProblems.length === 0
+        ? '<p class="hint">問題は見つかりませんでした。登録されているチャンネルは、すべて正しく認識されています。</p>'
+        : `<p class="hint">以下のチャンネルは、登録内容とYouTube側の情報が食い違っています。内容を確認し、必要であれば削除して登録し直してください。</p>
+           <div class="discover-list">
+             ${channelProblems.map(p => {
+               const g = gameById(p.game);
+               const reasonText = p.reason === 'not_found'
+                 ? '⚠ YouTube側でこのチャンネルIDが見つかりません（削除された、または登録時のIDが間違っている可能性があります）'
+                 : `⚠ 登録した名前「${p.savedName}」と、YouTube側の名前「${p.actualName}」が一致しません（チャンネルIDの取り違えの疑いがあります）`;
+               return `
+               <div class="discover-item" style="cursor:default;">
+                 <a href="https://www.youtube.com/channel/${p.channel_id}" target="_blank" rel="noopener" title="YouTubeでチャンネルを見る" style="text-decoration:none;">
+                   <span class="discover-thumb" style="display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--text-faint);">▶</span>
+                 </a>
+                 <span class="discover-info" style="flex:1;">
+                   <span class="discover-name">
+                     <span class="swatch-tag" style="background:${g ? g.color : '#999'}; margin-right:6px;">${g ? g.name : p.game}</span>
+                     ${p.savedName || '(名前未登録)'}
+                   </span>
+                   <span class="discover-meta">${reasonText}</span>
+                   <span class="discover-id">${p.channel_id}</span>
+                 </span>
+                 <div style="display:flex; gap:6px; flex-shrink:0;">
+                   <button class="del-btn" data-remove-problem="${p.channel_id}">削除する</button>
+                 </div>
+               </div>`;
+             }).join('')}
+           </div>`
+      }
+    </div>
+  ` : '';
+
   const tableHtml = `
     <div class="panel">
-      <h2>登録済み一覧（${items.length}件）</h2>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <h2 style="margin:0;">登録済み一覧（${items.length}件）</h2>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${type.columns.includes('game') ? `
+            <select id="sortModeSelect" style="padding:7px 9px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg); color:var(--text);">
+              <option value="default" ${(sortModeByType[activeType] || 'default') === 'default' ? 'selected' : ''}>登録順で表示</option>
+              <option value="game" ${sortModeByType[activeType] === 'game' ? 'selected' : ''}>ゲームごとに並び替え</option>
+            </select>
+          ` : ''}
+          ${activeType === 'manualChannels' ? `<button class="submit-btn" id="verifyChannelsBtn" style="padding:8px 14px;">チャンネルをチェックする</button>` : ''}
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
@@ -443,7 +508,52 @@ async function renderTabContent(){
     </div>
   `;
 
-  document.getElementById('tabContent').innerHTML = formHtml + tableHtml;
+  document.getElementById('tabContent').innerHTML = formHtml + problemsHtml + tableHtml;
+
+  // ▼並び替えセレクトの操作
+  const sortModeSelect = document.getElementById('sortModeSelect');
+  if (sortModeSelect) {
+    sortModeSelect.addEventListener('change', () => {
+      sortModeByType[activeType] = sortModeSelect.value;
+      renderTabContent();
+    });
+  }
+
+  // ▼「チャンネルをチェックする」ボタンの操作
+  const verifyChannelsBtn = document.getElementById('verifyChannelsBtn');
+  if (verifyChannelsBtn) {
+    verifyChannelsBtn.addEventListener('click', async () => {
+      verifyChannelsBtn.disabled = true;
+      verifyChannelsBtn.textContent = 'チェック中…';
+      try {
+        const data = await apiVerifyChannels();
+        channelProblems = data.problems || [];
+        showToast(channelProblems.length === 0
+          ? `チェック完了：${data.checked}件とも問題ありませんでした`
+          : `チェック完了：${data.checked}件中、${channelProblems.length}件で問題が見つかりました`);
+      } catch (e) {
+        showToast(e.message || 'チェックに失敗しました');
+      } finally {
+        renderTabContent();
+      }
+    });
+  }
+
+  // ▼チェック結果からの「削除する」ボタンの操作
+  document.querySelectorAll('[data-remove-problem]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const channelId = btn.dataset.removeProblem;
+      if (!confirm('このチャンネルの登録を削除しますか？')) return;
+      try {
+        await apiDeleteChannel(channelId);
+        channelProblems = channelProblems.filter(p => p.channel_id !== channelId);
+        showToast('削除しました');
+        renderTabContent();
+      } catch (e) {
+        showToast(e.message || '削除に失敗しました');
+      }
+    });
+  });
 
   // 編集モードの場合、フォームに既存の値を入れておく
   if (isEditing) {
