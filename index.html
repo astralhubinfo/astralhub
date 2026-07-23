@@ -795,8 +795,10 @@ function renderMainContent(){
   const { live: fLive, videos: fVideos, youtubeLoaded } = getFilteredData(activeGames);
   // 公式チャンネルの動画（isOfficial:true）と、それ以外（一般投稿者）の動画に分ける。
   // 「人気動画」「新着動画」は一般投稿者のみを対象にし、公式は下の「公式チャンネル」枠にまとめる。
-  const officialVideos = fVideos.filter(v => v.isOfficial);
-  const generalVideos = fVideos.filter(v => !v.isOfficial);
+  // ライブアーカイブ（isArchive:true）は検索専用データのため、ここではあらかじめ除外しておく。
+  const nonArchiveVideos = fVideos.filter(v => !v.isArchive);
+  const officialVideos = nonArchiveVideos.filter(v => v.isOfficial);
+  const generalVideos = nonArchiveVideos.filter(v => !v.isOfficial);
   const loading = !youtubeLoaded; // まだデータベースから一度も読み込めていない間は「読み込み中…」を表示する
 
   const blocks = {
