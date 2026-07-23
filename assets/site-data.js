@@ -8,6 +8,17 @@
 (function () {
   const { CATEGORY_LABEL, STORAGE_KEYS } = window.ASTRA_CONFIG;
 
+  // 絵文字は環境によって表示が崩れる(豆腐文字・別の絵柄になる等)ため、
+  // カード上のちょっとした目印にはこの線画アイコン(SVG)を使う。
+  const ICONS = {
+    // 固定表示(ニュースの「固定」マーク)
+    pin: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+    // アーカイブ(配信終了後の動画)マーク
+    archive: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>',
+    // 更新時刻の表示(更新マーク)
+    refresh: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>',
+  };
+
   function loadChannelLedger(){
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.channels);
@@ -77,7 +88,7 @@
     const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
     return `<div class="media-card">
       <${thumbTag} class="media-thumb landscape" style="${thumbStyle(g)}"${thumbLinkAttrs}>
-        <span class="badge-viewers">🔥 ${item.viewers.toLocaleString()}</span>
+        <span class="badge-viewers">${item.viewers.toLocaleString()}</span>
         ${thumbInner}
       </${thumbTag}>
       <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
@@ -100,7 +111,7 @@
       </${thumbTag}>
       <div class="card-tag-row">
         <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
-        ${item.isArchive ? '<span class="tag tag-cat">📼 アーカイブ</span>' : ''}
+        ${item.isArchive ? `<span class="tag tag-cat">${ICONS.archive} アーカイブ</span>` : ''}
       </div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span><span>${item.views.toLocaleString()}回視聴</span></div>
@@ -112,7 +123,7 @@
     const inner = `
       <div class="news-body">
         <div class="card-tag-row">
-          ${item.pinned === 'pinned' ? '<span class="tag tag-pinned">📌 固定</span>' : ''}
+          ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${ICONS.pin} 固定</span>` : ''}
           <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
           <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
         </div>

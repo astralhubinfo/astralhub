@@ -126,7 +126,8 @@
   .game-icon-text.icon-md { width: 48px; height: 48px; font-size: 14px; }
   .game-icon-text.icon-sm { width: 34px; height: 34px; font-size: 11px; }
   .card-tag-row { display:flex; gap:6px; margin: 8px 0 5px; }
-  .tag { font-size: 10.5px; font-weight:700; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; }
+  .tag { font-size: 10.5px; font-weight:700; padding:2px 7px; border-radius:4px; color:#fff; white-space:nowrap; display:inline-flex; align-items:center; gap:3px; }
+  .tag svg { flex-shrink: 0; }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
   .tag.tag-pinned { background: #fdf0d5; color: #a3690a; font-weight: 700; }
   .tag.tag-game { display: inline-block; min-width: 42px; text-align: center; }
@@ -452,7 +453,7 @@ function newsItemWithSummaryHtml(item){
   const inner = `
     <div class="news-body">
       <div class="card-tag-row">
-        ${item.pinned === 'pinned' ? '<span class="tag tag-pinned">📌 固定</span>' : ''}
+        ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${PIN_ICON_SVG} 固定</span>` : ''}
         <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
         <span class="tag tag-cat">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
       </div>
@@ -470,15 +471,17 @@ function newsItemWithSummaryHtml(item){
   return `<div class="news-item">${inner}</div>`;
 }
 
+const PIN_ICON_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>';
+const UPDATE_NOTE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1.5px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
 // 「LIVE配信」「新着動画」「人気動画」は自動取得の対象なので、更新頻度・最終更新時刻を表示する
 function renderUpdateNote(){
   const noteEl = document.getElementById('updateNote');
-  if (type !== 'live' && type !== 'latest' && type !== 'popular' && type !== 'official') { noteEl.textContent = ''; return; }
+  if (type !== 'live' && type !== 'latest' && type !== 'popular' && type !== 'official') { noteEl.innerHTML = ''; return; }
   const { lastFetchAt } = getYoutubeUpdateInfo();
   // LIVEは5分ごと、動画(人気・新着・公式)は30分ごとに、サーバー側で自動更新される設定になっています
   const freshLabel = type === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  noteEl.textContent = `🔄 ${freshLabel}（最終更新：${lastLabel}）`;
+  noteEl.innerHTML = `${UPDATE_NOTE_ICON_SVG} ${freshLabel}（最終更新：${lastLabel}）`;
 }
 
 function renderAll(){

@@ -304,7 +304,9 @@
   .tag {
     font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
     color: #fff; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 3px;
   }
+  .tag svg { flex-shrink: 0; position: relative; top: 0.5px; }
   .tag.tag-cat { background: var(--surface-strong); color: var(--text-secondary); }
   .tag.tag-pinned { background: #fdf0d5; color: #a3690a; font-weight: 700; }
   .tag.tag-game { display: inline-block; min-width: 42px; text-align: center; }
@@ -627,6 +629,7 @@ let mobileTab = 'main';
 /* =========================================================
    3. 描画
    ========================================================= */
+const UPDATE_NOTE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1.5px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
 // LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度・最終更新時刻の注釈を出す
 // kind: 'live'（配信）は基本リアルタイム、'video'（人気・新着動画）は数分キャッシュ、と表示を分ける
 function updateNoteHtml(kind){
@@ -634,7 +637,7 @@ function updateNoteHtml(kind){
   // LIVEは5分ごと、動画(人気・新着)は30分ごとに、サーバー側で自動更新される設定になっています
   const freshLabel = kind === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
   const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  return `<p class="update-note">🔄 ${freshLabel}（最終更新：${lastLabel}）</p>`;
+  return `<p class="update-note">${UPDATE_NOTE_ICON_SVG} ${freshLabel}（最終更新：${lastLabel}）</p>`;
 }
 
 // list（配列）を「初期表示の上限」までに切り出して card-grid のHTMLを組み立てる関数。
