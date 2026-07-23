@@ -760,6 +760,8 @@ function popularSectionHtml(list, loading){
       <a class="panel-more" href="list.html?type=popular">もっと見る ›</a>
     </div>
     ${updateNoteHtml('video', 'popular')}
+    <div class="pill-tabs" style="margin-bottom:14px;">
+      <button class="pill-tab ${popularRange==='24'?'active':''}" data-range="24">24時間</button>
       <button class="pill-tab ${popularRange==='7'?'active':''}" data-range="7">7日間</button>
       <button class="pill-tab ${popularRange==='30'?'active':''}" data-range="30">30日間</button>
     </div>
@@ -775,6 +777,7 @@ function latestSectionHtml(list, loading){
       <a class="panel-more" href="list.html?type=latest">もっと見る ›</a>
     </div>
     ${updateNoteHtml('video', 'latest')}
+    ${cardGridCappedHtml(sorted, videoCardHtml, 'latest', undefined, null, loading)}
   </div>`;
 }
 
@@ -797,6 +800,8 @@ function officialSectionHtml(list, loading){
       <a class="panel-more" href="list.html?type=official">もっと見る ›</a>
     </div>
     ${updateNoteHtml('video', 'official')}
+    <div class="pill-tabs" style="margin-bottom:14px;">
+      <button class="pill-tab ${officialTab==='latest'?'active':''}" data-official-tab="latest">新着</button>
       <button class="pill-tab ${officialTab==='popular'?'active':''}" data-official-tab="popular">人気（7日間）</button>
     </div>
     ${cardGridCappedHtml(sorted, videoCardHtml, 'official', '公式チャンネルの動画がありません', 'official-grid', loading)}
