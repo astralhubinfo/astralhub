@@ -528,6 +528,9 @@ const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 setInterval(() => { if (!document.hidden) fetchYouTubeAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchNewsAndRenderList(); }, NEWS_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchScheduleAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
+// 「最終更新：○分前」の表示だけは、データを取りに行かなくても時間経過で数字が進むよう、
+// 30秒ごとに文字だけ書き換える(全体を再描画するfetch系より軽い処理)
+setInterval(() => { if (!document.hidden) renderUpdateNote(); }, 30 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { fetchYouTubeAndRenderList(); fetchNewsAndRenderList(); fetchScheduleAndRenderList(); }
 });
