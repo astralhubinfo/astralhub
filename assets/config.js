@@ -85,7 +85,7 @@ window.ASTRA_CONFIG = {
     hsr:     ['スターレイル', '崩壊：スターレイル', '崩壊:スターレイル', 'HSR', 'Honkai: Star Rail'],
     zzz:     ['ゼンレスゾーンゼロ', 'ゼンゼロ', 'ZZZ', 'Zenless'],
     ww:      ['鳴潮', 'めいちょう', 'Wuthering Waves'],
-    nte:     ['NTE'],
+    nte:     ['NTE', 'Neverness to Everness'],
   },
 
   // ▲ここまで追加 ============================================
