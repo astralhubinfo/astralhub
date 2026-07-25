@@ -462,6 +462,15 @@
   /* LIVE一覧の「まもなく配信」カード：黄色い縁取り + オレンジ系バッジで、配信中カードと区別する */
   .schedule-card .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
   .badge-schedule { background: rgba(180, 83, 9, 0.92) !important; } /* badge-viewersの赤を上書き */
+
+  /* 配信中カードのうち、公式チャンネルのものを目立たせる装飾 */
+  .official-live .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
+  .badge-official {
+    position: absolute; top: 7px; right: 7px; z-index: 2;
+    background: rgba(180, 83, 9, 0.92); color: #fff;
+    font-size: 10.5px; font-weight: 700;
+    padding: 3px 7px; border-radius: 5px;
+  }
 </style>
 </head>
 <body>
@@ -548,7 +557,7 @@
 const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CONFIG;
 const {
   gameById, timeAgoLabel, emptyHtml, loadingHtml,
-  liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
+  liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
   getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
   isEligibleForPopular,
   refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
@@ -719,10 +728,12 @@ function liveSectionHtml(list, scheduleList, loading){
     const info = scheduleCountdownInfo(item);
     return info && info.imminent;
   });
+  // 公式チャンネルを視聴者数に関わらず先頭にし、それ以外は視聴者数が多い順に並べる
+  const sortedList = sortLiveForDisplay(list);
   // 表示件数の上限は「配信中」「まもなく配信」を合わせた件数で数える
   const limit = getDisplayLimit('live');
   const remainingLimit = Number.isFinite(limit) ? Math.max(0, limit - imminentSchedule.length) : limit;
-  const visibleLive = Number.isFinite(remainingLimit) ? list.slice(0, remainingLimit) : list;
+  const visibleLive = Number.isFinite(remainingLimit) ? sortedList.slice(0, remainingLimit) : sortedList;
 
   const hasAny = imminentSchedule.length > 0 || list.length > 0;
   const gridInner = hasAny

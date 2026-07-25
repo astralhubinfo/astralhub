@@ -118,6 +118,9 @@
   /* まもなく配信カード:黄色い縁取り + オレンジ系バッジで、配信中カードと区別する */
   .schedule-card .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
   .badge-schedule { background: rgba(180, 83, 9, 0.92) !important; }
+  /* 配信中カードのうち、公式チャンネルのものを目立たせる装飾 */
+  .official-live .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
+  .badge-official { position:absolute; top:7px; right:7px; z-index:2; background: rgba(180, 83, 9, 0.92); color:#fff; font-size:10.5px; font-weight:700; padding:3px 7px; border-radius:5px; }
   .game-icon-text {
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-weight: 900; text-align: center; line-height: 1;
@@ -193,7 +196,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular, getScheduleData, scheduleCountdownInfo, scheduleCardHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular, getScheduleData, scheduleCountdownInfo, scheduleCardHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
@@ -318,8 +321,10 @@ function renderContent(){
       return info && info.imminent;
     });
     const hasAny = imminentSchedule.length > 0 || live.length > 0;
+    // 公式チャンネルを視聴者数に関わらず先頭にし、それ以外は視聴者数が多い順に並べる
+    const sortedLive = sortLiveForDisplay(live);
     const gridInner = hasAny
-      ? (imminentSchedule.map(scheduleCardHtml).join('') + live.map(liveCardHtml).join(''))
+      ? (imminentSchedule.map(scheduleCardHtml).join('') + sortedLive.map(liveCardHtml).join(''))
       : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'));
     el.innerHTML = `<div class="card-grid">${gridInner}</div>`;
     return;

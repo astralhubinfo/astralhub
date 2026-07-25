@@ -79,6 +79,8 @@
     return `<span class="game-icon-text ${sizeClass || ''}" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>`;
   }
 
+  // isOfficial:true の場合、サムネイルに「公式」バッジと金色の縁取りを付けて目立たせる。
+  // (これがあることで、視聴者数が少なくても公式の配信だとひと目でわかるようにしている)
   function liveCardHtml(item){
     const g = gameById(item.game);
     const thumbInner = item.thumbnail
@@ -86,15 +88,29 @@
       : gameIconTextHtml(g, 'icon-md');
     const thumbTag = item.url ? 'a' : 'div';
     const thumbLinkAttrs = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
-    return `<div class="media-card">
+    const officialClass = item.isOfficial ? ' official-live' : '';
+    const officialBadge = item.isOfficial ? `<span class="badge-official">公式</span>` : '';
+    return `<div class="media-card${officialClass}">
       <${thumbTag} class="media-thumb landscape" style="${thumbStyle(g)}"${thumbLinkAttrs}>
         <span class="badge-viewers">${item.viewers.toLocaleString()}</span>
+        ${officialBadge}
         ${thumbInner}
       </${thumbTag}>
       <div class="card-tag-row"><span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span></div>
       <p class="card-title">${item.title}</p>
       <div class="card-meta"><span>${item.channel}</span></div>
     </div>`;
+  }
+
+  // LIVE一覧の並び替え:公式チャンネルは視聴者数に関わらず必ず先頭に、
+  // それ以外は視聴者数が多い順に並べる。index.html・list.htmlの両方から共通で使う。
+  function sortLiveForDisplay(list){
+    return [...list].sort((a, b) => {
+      const officialA = a.isOfficial ? 1 : 0;
+      const officialB = b.isOfficial ? 1 : 0;
+      if (officialA !== officialB) return officialB - officialA; // 公式を先に
+      return (b.viewers || 0) - (a.viewers || 0); // 視聴者数が多い順
+    });
   }
 
   function videoCardHtml(item){
@@ -532,7 +548,7 @@
 
   window.ASTRA_DATA = {
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
-    liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay,
+    liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
