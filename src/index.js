@@ -311,6 +311,20 @@ export default {
       }
     }
 
+    // 窓口7.5:見回り検索(ライブ)を今すぐ手動で実行する(POST /api/discover/live-patrol)
+    // ※本来は1日4回、自動で(Cronから)実行されるが、正しく動くか確認したいときに
+    //   admin.htmlや管理者本人が手動でも呼び出せるようにしておくためのテスト用窓口。
+    // ※ここで見つかったチャンネルも、窓口7の検索結果と同じ「審査待ちの箱」に入るため、
+    //   確認・承認は普段通り「候補チャンネル」タブから行う。
+    if (url.pathname === "/api/discover/live-patrol" && request.method === "POST") {
+      try {
+        const result = await runLiveDiscoveryPatrol(env);
+        return jsonResponse({ result });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // 窓口8:「審査待ちの箱」から少しずつ(規定件数まで)取り出して審査する(POST /api/discover/process)
     // ※Cloudflareの「1回の実行につき外部通信50回まで」という上限を超えないよう、少しずつ処理します。
     //   箱が空になるまで、admin.html側からこの窓口を繰り返し呼び出します。
@@ -436,6 +450,10 @@ export default {
     } else if (controller.cron === "*/30 * * * *") {
       // 30分ごと:人気動画の再生回数まとめ更新
       ctx.waitUntil(refreshRecentVideoStats(env));
+    } else if (controller.cron === "0 23,4,12,17 * * *") {
+      // 1日4回(日本時間:朝8時・昼13時・夜21時・深夜2時):
+      // 「今ライブ配信中」のものだけをゲームごとに見回り検索し、未登録チャンネルを発掘する
+      ctx.waitUntil(runLiveDiscoveryPatrol(env));
     }
   },
 };
@@ -1498,6 +1516,94 @@ async function searchRecentVideosByKeyword(keyword, publishedAfter, env, streamO
   }
 
   return { items: allItems, error: apiError };
+}
+
+// 【見回り検索専用】キーワードで、今まさにライブ配信中の動画だけを検索する(YouTube search API)
+// ※eventType=live を指定することで、通常の動画・配信予定(まだ始まっていない)・
+//   配信終了後のアーカイブは一切含まれず、「今この瞬間、生配信中のもの」だけがピンポイントで返ってくる。
+// ※ライブ中の配信はもともと件数が少ないため、ページ送り(複数ページ取得)はせず1回の確認で十分。
+async function searchLiveVideosByKeyword(keyword, env) {
+  const apiUrl =
+    `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50` +
+    `&eventType=live&q=${encodeURIComponent(keyword)}` +
+    `&key=${env.YOUTUBE_API_KEY}`;
+
+  const res = await fetch(apiUrl);
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    console.error("[AstralHub] ライブ見回り検索でエラーが発生しました", keyword, res.status, errBody);
+    return {
+      items: [],
+      error: `YouTube検索でエラーが発生しました(status: ${res.status})。1日の利用上限に達している可能性があります。`,
+    };
+  }
+  const data = await res.json();
+  return { items: data.items || [], error: null };
+}
+
+// 【見回り検索】1つのキーワードで「今ライブ配信中」のものだけを検索し、
+// 見つかった未登録チャンネルを、通常の発掘(窓口7)と同じ「審査待ちの箱」に入れる。
+// ※重複防止のしくみは通常の発掘とまったく同じ:
+//   すでに本登録済み(channelsテーブル = admin.htmlの「登録チャンネル」一覧そのもの)・
+//   審査待ち・採用済みの候補と重複するチャンネルは、ここで除外される。
+async function queueLiveSearchResults(gameId, keyword, env) {
+  const { items, error } = await searchLiveVideosByKeyword(keyword, env);
+
+  const now = new Date().toISOString();
+  const found = new Map(); // channelId -> 発見時刻(今)
+  for (const item of items) {
+    found.set(item.snippet.channelId, now);
+  }
+
+  if (found.size === 0) {
+    return { gameId, keyword, found: 0, queued: 0, error };
+  }
+
+  // すでに登録済み・審査待ち・採用済みのチャンネルは除外する
+  const { results: existingRows } = await env.DB.prepare(
+    `SELECT channel_id FROM channels
+     UNION SELECT channel_id FROM candidate_channels WHERE status != 'rejected'
+     UNION SELECT channel_id FROM discovery_queue`
+  ).all();
+  const existingIds = new Set(existingRows.map(r => r.channel_id));
+
+  const newEntries = [...found.entries()].filter(([channelId]) => !existingIds.has(channelId));
+  if (newEntries.length === 0) {
+    return { gameId, keyword, found: found.size, queued: 0, error };
+  }
+
+  const statements = newEntries.map(([channelId, lastRelatedVideoAt]) =>
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO discovery_queue
+        (channel_id, game_id, last_related_video_at, min_subscribers, secondary_keywords)
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(channelId, gameId, lastRelatedVideoAt, CANDIDATE_MIN_SUBSCRIBERS, "")
+  );
+  await env.DB.batch(statements);
+
+  return { gameId, keyword, found: found.size, queued: newEntries.length, error };
+}
+
+// 【見回り検索】登録している全ゲーム分を、1ゲームにつき1キーワードずつ検索する
+// ※1日4回のCron(scheduled)から呼ばれる。コストを抑えるため、ゲームごとに
+//   代表キーワード(GAME_KEYWORDSの1番目、ゲーム名そのもの)だけを使う。
+async function runLiveDiscoveryPatrol(env) {
+  const gameIds = Object.keys(GAME_KEYWORDS);
+  const summary = [];
+
+  for (const gameId of gameIds) {
+    const keyword = GAME_KEYWORDS[gameId][0];
+    try {
+      const result = await queueLiveSearchResults(gameId, keyword, env);
+      summary.push(result);
+    } catch (err) {
+      console.error("[AstralHub] 見回り検索でエラーが発生しました", gameId, err);
+      summary.push({ gameId, keyword, error: err.message });
+    }
+  }
+
+  console.log("[AstralHub] 見回り検索(ライブ)完了", JSON.stringify(summary));
+  return summary;
 }
 
 // チャンネルIDの配列から、詳細情報(登録者数・アップロード一覧の場所など)をまとめて取得する
