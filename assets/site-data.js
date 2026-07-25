@@ -219,8 +219,6 @@
   };
   // ▲ここまで ============================================
 
-  const YT_LAST_FETCH_KEY = 'astra_youtube_last_fetch'; // 最後に取得した時刻を覚えておく
-
   // データベース(D1)から取得した最新のLIVE・動画・ニュースデータを、一時的に覚えておくための入れ物。
   // ページを開いた直後(まだ一度も取得していない)は null のままで、その間は空として扱う。
   let cachedLive = null;
@@ -494,22 +492,11 @@
       ]);
       cachedLive = liveRows.map(mapLiveRow);
       cachedVideos = videoRows.map(mapVideoRow);
-      localStorage.setItem(YT_LAST_FETCH_KEY, String(Date.now()));
       return true;
     } catch (e) {
       console.error('[AstralHub] データベースからの取得に失敗しました', e);
       return false;
     }
-  }
-
-  // 「最終更新はいつか」をHTML側で表示するための情報を返す
-  function getYoutubeUpdateInfo(){
-    let lastFetchAt = null;
-    try {
-      const v = localStorage.getItem(YT_LAST_FETCH_KEY);
-      lastFetchAt = v ? parseInt(v, 10) : null;
-    } catch (e) { /* 無視 */ }
-    return { lastFetchAt };
   }
   // ▲ここまで追加 ============================================
 
@@ -551,7 +538,7 @@
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
-    refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
+    refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
   };
 })();

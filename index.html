@@ -563,7 +563,7 @@ const { GAMES, CATEGORY_LABEL, SECTION_LABELS, STORAGE_KEYS } = window.ASTRA_CON
 const {
   gameById, timeAgoLabel, emptyHtml, loadingHtml,
   liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
-  getFilteredData, refreshYouTubeData, getYoutubeUpdateInfo, refreshNewsData,
+  getFilteredData, refreshYouTubeData, refreshNewsData,
   isEligibleForPopular,
   refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
 } = window.ASTRA_DATA;
@@ -644,32 +644,12 @@ let mobileTab = 'main';
    3. 描画
    ========================================================= */
 const UPDATE_NOTE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1.5px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
-// LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度・最終更新時刻の注釈を出す
-// kind: 'live'（配信）は基本リアルタイム、'video'（人気・新着動画）は数分キャッシュ、と表示を分ける
+// LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度の注釈を出す
 // freshKind: 表示する更新頻度の文言を決める('live'=5分ごと、それ以外=30分ごと)
-// sectionKey: id用の一意なセクション名(同じ'video'系でも人気・新着・公式で別々のidにするため)
 function updateNoteHtml(freshKind, sectionKey){
   const key = sectionKey || freshKind;
-  const { lastFetchAt } = getYoutubeUpdateInfo();
-  // LIVEは5分ごと、動画(人気・新着)は30分ごとに、サーバー側で自動更新される設定になっています
   const freshLabel = freshKind === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
-  const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  // id を付けておき、refreshUpdateNoteLabels() から文字だけをピンポイントで更新できるようにする
-  return `<p class="update-note" id="update-note-${key}">${UPDATE_NOTE_ICON_SVG} ${freshLabel}（最終更新：${lastLabel}）</p>`;
-}
-
-// 「最終更新：○分前」の表示だけを、データの再取得なしで定期的に書き換える。
-// (カード一覧は変わらないので、renderAll()のような重い再描画は行わない)
-function refreshUpdateNoteLabels(){
-  [
-    { freshKind: 'live', sectionKey: 'live' },
-    { freshKind: 'video', sectionKey: 'popular' },
-    { freshKind: 'video', sectionKey: 'latest' },
-    { freshKind: 'video', sectionKey: 'official' },
-  ].forEach(({ freshKind, sectionKey }) => {
-    const el = document.getElementById(`update-note-${sectionKey}`);
-    if (el) el.outerHTML = updateNoteHtml(freshKind, sectionKey);
-  });
+  return `<p class="update-note" id="update-note-${key}">${UPDATE_NOTE_ICON_SVG} ${freshLabel}</p>`;
 }
 
 // list（配列）を「初期表示の上限」までに切り出して card-grid のHTMLを組み立てる関数。
@@ -927,9 +907,6 @@ const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 setInterval(() => { if (!document.hidden) fetchYouTubeAndRender(); }, LIVE_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchNewsAndRender(); }, NEWS_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchScheduleAndRender(); }, LIVE_REFRESH_INTERVAL_MS);
-// 「最終更新：○分前」の表示だけは、データを取りに行かなくても時間経過で数字が進むよう、
-// 30秒ごとに文字だけ書き換える(全体を再描画するfetch系より軽い処理)
-setInterval(() => { if (!document.hidden) refreshUpdateNoteLabels(); }, 30 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { fetchYouTubeAndRender(); fetchNewsAndRender(); fetchScheduleAndRender(); }
 });

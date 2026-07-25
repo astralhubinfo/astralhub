@@ -198,7 +198,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { GAMES } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay, emptyHtml, loadingHtml, getFilteredData, getYoutubeUpdateInfo, shortNameFor, gameIconTextHtml, isEligibleForPopular, getScheduleData, scheduleCountdownInfo, scheduleCardHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay, emptyHtml, loadingHtml, getFilteredData, shortNameFor, gameIconTextHtml, isEligibleForPopular, getScheduleData, scheduleCountdownInfo, scheduleCardHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const type = params.get('type') || 'news';
@@ -480,15 +480,13 @@ function newsItemWithSummaryHtml(item){
 
 const PIN_ICON_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>';
 const UPDATE_NOTE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1.5px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
-// 「LIVE配信」「新着動画」「人気動画」は自動取得の対象なので、更新頻度・最終更新時刻を表示する
+// 「LIVE配信」「新着動画」「人気動画」は自動取得の対象なので、更新頻度を表示する
 function renderUpdateNote(){
   const noteEl = document.getElementById('updateNote');
   if (type !== 'live' && type !== 'latest' && type !== 'popular' && type !== 'official') { noteEl.innerHTML = ''; return; }
-  const { lastFetchAt } = getYoutubeUpdateInfo();
   // LIVEは5分ごと、動画(人気・新着・公式)は30分ごとに、サーバー側で自動更新される設定になっています
   const freshLabel = type === 'live' ? '5分ごとに自動更新' : '30分ごとに自動更新';
-  const lastLabel = lastFetchAt ? timeAgoLabel(new Date(lastFetchAt).toISOString()) : '未取得';
-  noteEl.innerHTML = `${UPDATE_NOTE_ICON_SVG} ${freshLabel}（最終更新：${lastLabel}）`;
+  noteEl.innerHTML = `${UPDATE_NOTE_ICON_SVG} ${freshLabel}`;
 }
 
 function renderAll(){
@@ -535,9 +533,6 @@ const NEWS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 setInterval(() => { if (!document.hidden) fetchYouTubeAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchNewsAndRenderList(); }, NEWS_REFRESH_INTERVAL_MS);
 setInterval(() => { if (!document.hidden) fetchScheduleAndRenderList(); }, LIVE_REFRESH_INTERVAL_MS);
-// 「最終更新：○分前」の表示だけは、データを取りに行かなくても時間経過で数字が進むよう、
-// 30秒ごとに文字だけ書き換える(全体を再描画するfetch系より軽い処理)
-setInterval(() => { if (!document.hidden) renderUpdateNote(); }, 30 * 1000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { fetchYouTubeAndRenderList(); fetchNewsAndRenderList(); fetchScheduleAndRenderList(); }
 });
