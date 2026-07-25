@@ -279,7 +279,7 @@
   }
   .media-thumb.portrait { aspect-ratio: 3/4; }
   .media-thumb.landscape { aspect-ratio: 16/9; }
-  .media-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .media-thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
   .game-icon-text {
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-weight: 900; text-align: center; line-height: 1;
@@ -465,6 +465,11 @@
 
   /* 配信中カードのうち、公式チャンネルのものを目立たせる装飾 */
   .official-live .media-thumb { outline: 2px solid #ffd666; outline-offset: -2px; }
+  /* サムネ全体にごく薄い金色を重ねて、リスト内でも気づきやすくする */
+  .official-live .media-thumb::before {
+    content: ''; position: absolute; inset: 0; z-index: 1;
+    background: rgba(255, 214, 102, 0.16); pointer-events: none;
+  }
   .badge-official {
     position: absolute; top: 7px; right: 7px; z-index: 2;
     background: rgba(180, 83, 9, 0.92); color: #fff;
