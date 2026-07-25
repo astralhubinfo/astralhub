@@ -41,6 +41,7 @@ window.ASTRA_CONFIG = {
     { channelId: 'UCt09C9DPSuOGpHoitbcyCIQ', gameId: 'zzz',     label: 'ゼンレスゾーンゼロ 公式チャンネル' },
     { channelId: 'UCGc93NguHRwzv1Rw9MyIcxQ', gameId: 'ww',      label: '鳴潮 公式チャンネル' },
     { channelId: 'UClKUii0-uZwx6QOFIEJ1foA', gameId: 'nte',     label: 'NTE 公式チャンネル' },
+    { channelId: 'UCb7ve-ncnLh41F4sYpFTcXA', gameId: 'genshin', label: 'HoYoFair（原神関連の公式チャンネル）' },
   ],
 
   // 動画の種類ごとの更新頻度（分単位）

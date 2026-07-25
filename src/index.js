@@ -884,6 +884,7 @@ const OFFICIAL_CHANNEL_IDS = new Set([
   'UCt09C9DPSuOGpHoitbcyCIQ', // ゼンレスゾーンゼロ 公式チャンネル
   'UCGc93NguHRwzv1Rw9MyIcxQ', // 鳴潮 公式チャンネル
   'UClKUii0-uZwx6QOFIEJ1foA', // NTE 公式チャンネル
+  'UCb7ve-ncnLh41F4sYpFTcXA', // HoYoFair（原神関連の公式チャンネル）
 ]);
 
 // タイトル・概要欄に、ショート動画を示すハッシュタグが含まれているか判定する

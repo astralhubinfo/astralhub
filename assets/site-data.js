@@ -216,6 +216,7 @@
     'UCt09C9DPSuOGpHoitbcyCIQ': 'zzz',     // ゼンレスゾーンゼロ 公式チャンネル
     'UCGc93NguHRwzv1Rw9MyIcxQ': 'ww',      // 鳴潮 公式チャンネル
     'UClKUii0-uZwx6QOFIEJ1foA': 'nte',     // NTE 公式チャンネル
+    'UCb7ve-ncnLh41F4sYpFTcXA': 'genshin', // HoYoFair（原神関連の公式チャンネル）
   };
   // ▲ここまで ============================================
 
