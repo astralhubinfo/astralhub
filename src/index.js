@@ -1559,10 +1559,13 @@ async function queueLiveSearchResults(gameId, keyword, env) {
     return { gameId, keyword, found: 0, queued: 0, error };
   }
 
-  // すでに登録済み・審査待ち・採用済みのチャンネルは除外する
+  // すでに登録済み・審査待ち・採用済み・却下済みのチャンネルは除外する
+  // ※見回り検索(Cron)は毎日繰り返し動くため、一度きちんと精査して却下したチャンネルを
+  //   何度も拾い直さないよう、通常の「候補を探す」ボタン(queueSearchResults)とは違い、
+  //   却下済み(status = 'rejected')も除外の対象に含めている。
   const { results: existingRows } = await env.DB.prepare(
     `SELECT channel_id FROM channels
-     UNION SELECT channel_id FROM candidate_channels WHERE status != 'rejected'
+     UNION SELECT channel_id FROM candidate_channels
      UNION SELECT channel_id FROM discovery_queue`
   ).all();
   const existingIds = new Set(existingRows.map(r => r.channel_id));
@@ -1587,10 +1590,14 @@ async function queueLiveSearchResults(gameId, keyword, env) {
 // 【見回り検索】登録している全ゲーム分を、1ゲームにつき1キーワードずつ検索する
 // ※1日4回のCron(scheduled)から呼ばれる。コストを抑えるため、ゲームごとに
 //   代表キーワード(GAME_KEYWORDSの1番目、ゲーム名そのもの)だけを使う。
+// ※検索(①)で見つけたチャンネルは、そのまま審査(②)まで済ませてしまう。
+//   これにより、admin.htmlで「候補を探す」を手動で押さなくても、次に画面を開いたときには
+//   審査を通過したチャンネルが「候補チャンネル」として並んだ状態になる。
 async function runLiveDiscoveryPatrol(env) {
   const gameIds = Object.keys(GAME_KEYWORDS);
   const summary = [];
 
+  // ①検索:ゲームごとに1キーワードずつ、ライブ配信中のチャンネルを探して審査待ちの箱に入れる
   for (const gameId of gameIds) {
     const keyword = GAME_KEYWORDS[gameId][0];
     try {
@@ -1602,8 +1609,25 @@ async function runLiveDiscoveryPatrol(env) {
     }
   }
 
-  console.log("[AstralHub] 見回り検索(ライブ)完了", JSON.stringify(summary));
-  return summary;
+  // ②審査:審査待ちの箱が空になるまで、少しずつ審査する
+  //   (1回のCron実行で溜まる件数はもともと少ないため、安全装置として最大10回までとする)
+  let totalAdded = 0;
+  let processRounds = 0;
+  try {
+    let remaining = 1;
+    while (remaining > 0 && processRounds < 10) {
+      const r = await processDiscoveryQueueBatch(env);
+      totalAdded += r.added || 0;
+      remaining = r.remaining || 0;
+      processRounds += 1;
+      if (!r.processed) break; // 念のための安全装置(無限ループ防止)
+    }
+  } catch (err) {
+    console.error("[AstralHub] 見回り検索後の審査処理でエラーが発生しました", err);
+  }
+
+  console.log("[AstralHub] 見回り検索(ライブ)完了", JSON.stringify(summary), "審査で追加:", totalAdded);
+  return { searchSummary: summary, candidatesAdded: totalAdded };
 }
 
 // チャンネルIDの配列から、詳細情報(登録者数・アップロード一覧の場所など)をまとめて取得する
