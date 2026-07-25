@@ -143,9 +143,11 @@
   .news-item { display:flex; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); align-items:flex-start; }
   .news-item:last-child { border-bottom:none; }
   .news-body { min-width:0; flex:1; }
-  .news-thumb { width:64px; height:64px; border-radius: var(--radius-sm); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; font-size:14px; }
   .news-title { font-size:14px; font-weight:500; margin:6px 0 4px; line-height:1.5; }
   .news-time { font-family: var(--font-mono); font-size:11px; color: var(--text-faint); }
+  /* ゲーム・ジャンルタグ:クリックすると、そのタグの一覧ページへ移動する */
+  .tag-link { cursor: pointer; }
+  .tag-link:hover { filter: brightness(0.92); }
   .gacha-period-row { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; margin: 2px 0 4px; }
   .gacha-period-range { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
   .gacha-period-remain { font-family: var(--font-mono); font-size: 11.5px; font-weight:700; color: var(--text-secondary); }
@@ -225,6 +227,12 @@ let searchKeyword = params.get('q') || '';
 let searchGameId = params.get('game') || '';
 let searchSort = 'latest'; // 'latest'（新着順）| 'popular'（人気＝再生数順）
 let searchIncludeArchive = false; // ライブアーカイブも検索対象に含めるかどうか
+
+// ▼ここから追加:ニュースの「ゲーム」「ジャンル」絞り込み ============================================
+// タグクリック(list.html?type=news&game=xxx や &cat=xxx)からの遷移も、この2つの変数で受け止める
+let newsGameFilter = params.get('game') || '';
+let newsCatFilter = params.get('cat') || '';
+// ▲ここまで追加 ============================================
 
 // 一覧を件数で区切って表示し、下に「前へ／次へ」のページ送りを付ける共通処理
 function renderPaginatedGrid(container, items, cardFn, emptyMsg, wrapClass, loading){
@@ -450,9 +458,35 @@ function renderContent(){
   }
 
   // news
-  subTabsEl.innerHTML = '';
-  const sorted = sortNewsForDisplay(news);
-  renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, undefined, 'news-list', newsLoading);
+  const CATEGORY_LABEL = window.ASTRA_CONFIG.CATEGORY_LABEL;
+  subTabsEl.innerHTML = `
+    <div class="search-form">
+      <select id="newsGameSelect" class="search-select">
+        <option value="">すべてのゲーム</option>
+        ${GAMES.map(g => `<option value="${g.id}" ${newsGameFilter===g.id?'selected':''}>${g.name}</option>`).join('')}
+      </select>
+      <select id="newsCatSelect" class="search-select">
+        <option value="">すべてのジャンル</option>
+        ${Object.keys(CATEGORY_LABEL).map(key => `<option value="${key}" ${newsCatFilter===key?'selected':''}>${CATEGORY_LABEL[key]}</option>`).join('')}
+      </select>
+    </div>
+  `;
+  document.getElementById('newsGameSelect').addEventListener('change', (e) => {
+    newsGameFilter = e.target.value;
+    currentPage = 1;
+    renderContent();
+  });
+  document.getElementById('newsCatSelect').addEventListener('change', (e) => {
+    newsCatFilter = e.target.value;
+    currentPage = 1;
+    renderContent();
+  });
+
+  let filteredNews = news;
+  if (newsGameFilter) filteredNews = filteredNews.filter(n => n.game === newsGameFilter);
+  if (newsCatFilter) filteredNews = filteredNews.filter(n => n.cat === newsCatFilter);
+  const sorted = sortNewsForDisplay(filteredNews);
+  renderPaginatedGrid(el, sorted, newsItemWithSummaryHtml, '条件に一致するニュースが見つかりませんでした', 'news-list', newsLoading);
 }
 
 // 一覧ページでは、ニュースに本文（要約）があれば見出しの下に表示する。クリックで記事詳細へ遷移する。
@@ -462,15 +496,12 @@ function newsItemWithSummaryHtml(item){
     <div class="news-body">
       <div class="card-tag-row">
         ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${PIN_ICON_SVG} 固定</span>` : ''}
-        <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
-        <span class="tag tag-cat">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
+        <span class="tag tag-game tag-link" style="background:${g.color}" title="「${g.name}」のニュース一覧へ" data-nav="list.html?type=news&game=${encodeURIComponent(item.game)}">${shortNameFor(g)}</span>
+        <span class="tag tag-cat tag-link" title="「${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
       </div>
       <p class="news-title">${item.title}</p>
       ${item.summary ? `<p class="news-summary">${item.summary}</p>` : ''}
       <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
-    </div>
-    <div class="news-thumb" style="background: linear-gradient(135deg, ${g.color}, ${g.color}99);">
-      ${gameIconTextHtml(g, 'icon-sm')}
     </div>
   `;
   if (item.id) {
@@ -496,6 +527,15 @@ function renderAll(){
   renderUpdateNote();
 }
 renderAll();
+
+// ニュースの「ゲームタグ」「ジャンルタグ」がクリックされたら、そのタグの一覧ページへ移動する。
+document.addEventListener('click', (e) => {
+  const tag = e.target.closest('.tag-link');
+  if (!tag) return;
+  e.preventDefault();
+  e.stopPropagation(); // カード全体のリンク(記事詳細への遷移)が同時に発生しないようにする
+  location.href = tag.dataset.nav;
+});
 
 // list.htmlに直接アクセスされた場合（index.htmlを経由していない場合）でも、
 // LIVE・動画・ニュースデータが最新の状態になるよう、ここでも自動取得を行う。

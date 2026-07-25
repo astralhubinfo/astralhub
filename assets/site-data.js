@@ -134,20 +134,23 @@
     </div>`;
   }
 
+  // ゲームタグ・ジャンルタグはクリックすると、そのゲーム／ジャンルのニュース一覧(list.html)へ移動する。
+  // ※カード全体(news-item)は記事詳細(article.html)へのリンクなので、
+  //   タグは<a>ではなく<span data-nav="...">にしておき、クリック時にJS側(各HTMLファイル)で
+  //   画面遷移を行う(こうすることで、リンクの中にリンクを入れてしまう問題を避けている)。
   function newsItemHtml(item){
     const g = gameById(item.game);
     const inner = `
       <div class="news-body">
         <div class="card-tag-row">
           ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${ICONS.pin} 固定</span>` : ''}
-          <span class="tag tag-game" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
-          <span class="tag tag-cat">${CATEGORY_LABEL[item.cat]}</span>
+          <span class="tag tag-game tag-link" style="background:${g.color}" title="「${g.name}」のニュース一覧へ" data-nav="list.html?type=news&game=${encodeURIComponent(item.game)}">${shortNameFor(g)}</span>
+          <span class="tag tag-cat tag-link" title="「${CATEGORY_LABEL[item.cat]}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${CATEGORY_LABEL[item.cat]}</span>
         </div>
         <p class="news-title">${item.title}</p>
         ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}
         <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
       </div>
-      <div class="news-thumb" style="${thumbStyle(g)}">${gameIconTextHtml(g, 'icon-sm')}</div>
     `;
     if (item.id) {
       return `<a class="news-item" href="article.html?id=${encodeURIComponent(item.id)}">${inner}</a>`;

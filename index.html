@@ -345,15 +345,13 @@
   }
   .news-item:last-child { border-bottom: none; }
   .news-body { min-width: 0; flex: 1; }
-  .news-thumb {
-    width: 56px; height: 56px; border-radius: var(--radius-sm);
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 900; font-size: 13px;
-  }
   .news-title {
     font-size: 13px; font-weight: 500; margin: 6px 0 4px; line-height: 1.4;
   }
   .news-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
+  /* ゲーム・ジャンルタグ:クリックすると、そのタグの一覧ページへ移動する */
+  .tag-link { cursor: pointer; }
+  .tag-link:hover { filter: brightness(0.92); }
   .gacha-period-row { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; margin: 2px 0 4px; }
   .gacha-period-range { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
   .gacha-period-remain { font-family: var(--font-mono); font-size: 11.5px; font-weight:700; color: var(--text-secondary); }
@@ -869,7 +867,17 @@ function renderAll(){
 }
 renderAll();
 
-/* ▼ここから追加：YouTubeからLIVE・動画データを自動取得する ===========
+// ニュースの「ゲームタグ」「ジャンルタグ」がクリックされたら、そのタグの一覧ページへ移動する。
+// (ページ内のどこに表示されるタグでも拾えるよう、documentに1回だけ登録している)
+document.addEventListener('click', (e) => {
+  const tag = e.target.closest('.tag-link');
+  if (!tag) return;
+  e.preventDefault();
+  e.stopPropagation(); // カード全体のリンク(記事詳細への遷移)が同時に発生しないようにする
+  location.href = tag.dataset.nav;
+});
+
+/* ▼ここから追加:YouTubeからLIVE・動画データを自動取得する ===========
    1. まず今までのやり方（管理画面登録データ）で画面を表示（上のrenderAll()）
    2. その裏でYouTube・ニュースのデータベースに問い合わせに行く
    3. 取得できたら、画面を最新のデータで再表示する
