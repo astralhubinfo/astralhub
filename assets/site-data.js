@@ -145,7 +145,7 @@
         <div class="card-tag-row">
           ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${ICONS.pin} 固定</span>` : ''}
           <span class="tag tag-game tag-link" style="background:${g.color}" title="「${g.name}」のニュース一覧へ" data-nav="list.html?type=news&game=${encodeURIComponent(item.game)}">${shortNameFor(g)}</span>
-          <span class="tag tag-cat tag-link" title="「${CATEGORY_LABEL[item.cat]}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${CATEGORY_LABEL[item.cat]}</span>
+          ${item.cat ? `<span class="tag tag-cat tag-link" title="「${CATEGORY_LABEL[item.cat] || item.cat}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${CATEGORY_LABEL[item.cat] || item.cat}</span>` : ''}
         </div>
         <p class="news-title">${item.title}</p>
         ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}

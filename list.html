@@ -496,7 +496,7 @@ function newsItemWithSummaryHtml(item){
       <div class="card-tag-row">
         ${item.pinned === 'pinned' ? `<span class="tag tag-pinned">${PIN_ICON_SVG} 固定</span>` : ''}
         <span class="tag tag-game tag-link" style="background:${g.color}" title="「${g.name}」のニュース一覧へ" data-nav="list.html?type=news&game=${encodeURIComponent(item.game)}">${shortNameFor(g)}</span>
-        <span class="tag tag-cat tag-link" title="「${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
+        ${item.cat ? `<span class="tag tag-cat tag-link" title="「${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || item.cat}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || item.cat}</span>` : ''}
       </div>
       <p class="news-title">${item.title}</p>
       <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>

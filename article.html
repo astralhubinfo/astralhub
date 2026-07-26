@@ -184,7 +184,7 @@ pageEl.innerHTML = loadingHtml();
       <div class="tag-row">
         ${item.pinned === 'pinned' ? '<span class="tag tag-pinned">📌 固定</span>' : ''}
         <span class="tag" style="background:${g.color}">${g.name}</span>
-        <span class="tag tag-cat">${CATEGORY_LABEL[item.cat] || ''}</span>
+        ${item.cat ? `<span class="tag tag-cat">${CATEGORY_LABEL[item.cat] || item.cat}</span>` : ''}
       </div>
       <h1 class="article-title">${item.title}</h1>
       <span class="article-time">${timeAgoLabel(item.publishedAt)}・${new Date(item.publishedAt).toLocaleString('ja-JP')}</span>

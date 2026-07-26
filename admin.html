@@ -162,7 +162,7 @@ const TYPES = {
     label: 'ニュース',
     fields: [
       { key:'game', label:'ゲーム', type:'game-select' },
-      { key:'cat', label:'カテゴリ', type:'select', options: Object.entries(CATEGORY_LABEL).map(([v,l]) => ({value:v, label:l})) },
+      { key:'cat', label:'カテゴリ', type:'select', options: [{value:'', label:'なし'}, ...Object.entries(CATEGORY_LABEL).map(([v,l]) => ({value:v, label:l}))] },
       { key:'pinned', label:'固定表示', type:'select', options: [
         {value:'', label:'固定しない'}, {value:'pinned', label:'固定する（常に一番上に表示）'},
       ] },
@@ -428,7 +428,7 @@ async function renderTabContent(){
       ${type.columns.map(col => {
         if (col === 'status') return `<td>${item.status === 'draft' ? '<span class="swatch-tag" style="background:#9aa1ac">下書き</span>' : '<span class="swatch-tag" style="background:#1fae7a">公開済み</span>'}</td>`;
         if (col === 'game') return `<td><span class="swatch-tag" style="background:${g ? g.color : '#999'}">${g ? g.name : item.game}</span></td>`;
-        if (col === 'cat') return `<td>${CATEGORY_LABEL[item.cat] || item.cat}</td>`;
+        if (col === 'cat') return `<td>${CATEGORY_LABEL[item.cat] || (item.cat ? item.cat : 'なし')}</td>`;
         if (col === 'pinned') return `<td>${item.pinned === 'pinned' ? '<span class="swatch-tag" style="background:#e6a729">📌 固定</span>' : '－'}</td>`;
         if (col === 'url') return `<td class="url-cell" title="${item.url || ''}">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener">${item.url}</a>` : '－'}</td>`;
         if (col === 'summary') return `<td class="summary-cell" title="${(item.summary || '').replace(/"/g,'&quot;')}">${item.summary || '－'}</td>`;
