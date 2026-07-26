@@ -152,7 +152,6 @@
   .gacha-period-range { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
   .gacha-period-remain { font-family: var(--font-mono); font-size: 11.5px; font-weight:700; color: var(--text-secondary); }
   .gacha-urgent .gacha-period-remain { color: var(--live); }
-  .news-summary { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 4px; line-height:1.6; }
 
   .empty-state { padding: 40px 10px; text-align:center; color: var(--text-faint); font-size:13px; }
   .empty-state.loading-state { color: var(--text-secondary); }
@@ -500,7 +499,6 @@ function newsItemWithSummaryHtml(item){
         <span class="tag tag-cat tag-link" title="「${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}」のニュース一覧へ" data-nav="list.html?type=news&cat=${encodeURIComponent(item.cat)}">${window.ASTRA_CONFIG.CATEGORY_LABEL[item.cat] || ''}</span>
       </div>
       <p class="news-title">${item.title}</p>
-      ${item.summary ? `<p class="news-summary">${item.summary}</p>` : ''}
       <span class="news-time">${timeAgoLabel(item.publishedAt)}</span>
     </div>
   `;
