@@ -173,9 +173,23 @@
     .sidebar { display: none; }
   }
   /* ニュース欄(サイドバー)を、配信一覧など長いメインエリアをスクロールしている間も
-     画面内に留まるようにする(ヘッダーの高さぶんの余白をあけて、隠れないようにしている) */
+     画面内に留まるようにする(ヘッダーの高さぶんの余白をあけて、隠れないようにしている)。
+     さらに、ニュース欄の中身が画面の高さより多い場合は、メイン側を動かさなくても
+     ニュース欄の中だけで続きをスクロールできるようにしている。 */
   @media (min-width: 901px) {
-    .sidebar { position: sticky; top: 84px; }
+    .sidebar {
+      position: sticky; top: 84px;
+      max-height: calc(100vh - 84px - 20px);
+      overflow-y: auto;
+    }
+    /* ニュース欄の中をスクロールしても、見出し(「最新ニュース」「もっと見る」)は
+       常に上に固定表示されるようにする(記事一覧だけがその下でスクロールする) */
+    .sidebar .panel-head {
+      position: sticky; top: 0; z-index: 1;
+      background: var(--surface);
+      padding-bottom: 10px;
+      margin-bottom: 4px;
+    }
   }
 
   /* ---------- スマホ版：ゲーム選択メニューをアイコン化 ---------- */
