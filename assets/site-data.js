@@ -180,7 +180,9 @@
 
     const activeSet = new Set(activeGameIds);
     return {
-      news: news.filter(n => activeSet.has(n.game)),
+      // 「管理人」はフィルターチップが無く、ユーザーがON/OFFを選べないため、
+      // 過去に保存されたフィルター状態に関わらず常に表示する(除外されるとお知らせが消えてしまうため)
+      news: news.filter(n => n.game === 'admin' || activeSet.has(n.game)),
       live: live.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
       videos: videos.filter(v => activeSet.has(v.game) && passesChannelRules(v)),
       // LIVE・動画・ニュースがデータベースから一度でも読み込めているか(false中は「読み込み中…」を表示するために使う)

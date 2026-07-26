@@ -172,6 +172,11 @@
     .page { grid-template-columns: 1fr; padding: 14px 14px 88px; }
     .sidebar { display: none; }
   }
+  /* ニュース欄(サイドバー)を、配信一覧など長いメインエリアをスクロールしている間も
+     画面内に留まるようにする(ヘッダーの高さぶんの余白をあけて、隠れないようにしている) */
+  @media (min-width: 901px) {
+    .sidebar { position: sticky; top: 84px; }
+  }
 
   /* ---------- スマホ版：ゲーム選択メニューをアイコン化 ---------- */
   @media (max-width: 900px) {
