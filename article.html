@@ -102,6 +102,14 @@
   .gacha-items-table tr.gacha-highlight-row td { font-weight:700; color: #8a5a00; }
   .gacha-items-table tr.gacha-highlight-row td:first-child::before { content: '★ '; color: #d6a017; }
 
+  /* 1つの記事に複数のガチャがある場合、ガチャ(バナー)ごとにグループとしてまとめて表示する */
+  .gacha-banner-group { margin: 0 0 28px; }
+  .gacha-banner-group:last-child { margin-bottom: 0; }
+  .gacha-banner-title {
+    font-size: 15px; font-weight: 900; color: var(--text);
+    margin: 0 0 14px; padding-left: 10px; border-left: 4px solid var(--accent);
+  }
+
   .not-found { text-align:center; padding: 60px 20px; color: var(--text-faint); }
   .not-found a { color: var(--accent); font-weight:500; }
 

@@ -410,6 +410,7 @@ async function renderTabContent(){
       <div class="form-grid" id="formGrid">${type.fields.map(fieldHtml).join('')}${activeType === 'news' ? `
         <div class="field full gacha-only" id="gachaItemsField">
           <label>ピックアップ一覧（カテゴリ「ガチャ」の場合のみ／キャラ・武器を自由に追加できます）</label>
+          <p class="hint" style="margin:-4px 0 8px;">同じ期間に複数のガチャがある場合は、「ガチャ名」欄に同じ名前を入力した行同士が1つの表にまとまります（空欄のままなら、今まで通り1つの表になります）。</p>
           <div id="gachaItemsList"></div>
           <button type="button" class="add-item-btn" id="addGachaItemBtn">＋ ピックアップを追加</button>
         </div>
@@ -567,13 +568,14 @@ async function renderTabContent(){
   // 1行=1体(1つ)のピックアップ。「＋」ボタンで自由に行を増やし、「✕」で削除できる。
   if (activeType === 'news') {
     function addGachaItemRow(item){
-      item = item || { name:'', rarity:'', type:'', kind:'character', highlight:false };
+      item = item || { name:'', rarity:'', type:'', kind:'character', highlight:false, banner:'' };
       const list = document.getElementById('gachaItemsList');
       const row = document.createElement('div');
       row.className = 'gacha-item-row';
       const esc = (s) => String(s || '').replace(/"/g, '&quot;');
       const kind = item.kind === 'weapon' ? 'weapon' : 'character';
       row.innerHTML = `
+        <input type="text" class="gacha-banner" placeholder="ガチャ名（例：コロンビーナ）" value="${esc(item.banner)}">
         <select class="gacha-kind">
           <option value="character" ${kind==='character'?'selected':''}>キャラ</option>
           <option value="weapon" ${kind==='weapon'?'selected':''}>武器</option>
@@ -635,6 +637,7 @@ async function renderTabContent(){
     // ガチャのピックアップ一覧を、名前が入力されている行だけ集めてformValuesに追加する
     if (activeType === 'news') {
       formValues.gachaItems = Array.from(document.querySelectorAll('#gachaItemsList .gacha-item-row')).map(row => ({
+        banner: row.querySelector('.gacha-banner').value.trim(),
         kind: row.querySelector('.gacha-kind').value,
         name: row.querySelector('.gacha-name').value.trim(),
         rarity: row.querySelector('.gacha-rarity').value.trim(),

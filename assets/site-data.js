@@ -404,16 +404,16 @@
     </div>`;
   }
 
-  // ピックアップ一覧を、キャラ枠・武器枠に分けた表(テーブル)のHTMLに変換する(記事詳細ページで使う)
+  // ピックアップ一覧を、バナー(ガチャ名)ごとにグループ分けし、各グループをさらに
+  // キャラ枠・武器枠に分けた表(テーブル)のHTMLに変換する(記事詳細ページで使う)。
+  // ※1つの開催期間に複数のガチャがある場合、item.banner(バナー名)が同じものを1つの表セットにまとめる。
+  // ※banner未入力(従来通りの1本だけのガチャ)の場合は、これまで通り見出しなしの表になる。
   function gachaItemsTableHtml(items){
     if (!Array.isArray(items) || items.length === 0) return '';
     const esc = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const rowsHtml = (list) => list.map(it => `<tr${it.highlight ? ' class="gacha-highlight-row"' : ''}>
       <td>${esc(it.name)}</td><td>${esc(it.rarity)}</td><td>${esc(it.type)}</td>
     </tr>`).join('');
-
-    const characters = items.filter(it => it.kind !== 'weapon');
-    const weapons = items.filter(it => it.kind === 'weapon');
 
     const block = (title, list, typeLabel) => {
       if (list.length === 0) return '';
@@ -426,7 +426,27 @@
       </div>`;
     };
 
-    return block('キャラクター', characters, '属性') + block('武器', weapons, '武器種');
+    // バナー名(banner)ごとにグループ分けする。入力順を保つため配列+Mapで管理する。
+    const groups = [];
+    const groupIndexByBanner = new Map();
+    items.forEach(it => {
+      const bannerKey = (it.banner || '').trim();
+      if (!groupIndexByBanner.has(bannerKey)) {
+        groupIndexByBanner.set(bannerKey, groups.length);
+        groups.push({ banner: bannerKey, items: [] });
+      }
+      groups[groupIndexByBanner.get(bannerKey)].items.push(it);
+    });
+
+    return groups.map((grp, idx) => {
+      const characters = grp.items.filter(it => it.kind !== 'weapon');
+      const weapons = grp.items.filter(it => it.kind === 'weapon');
+      // バナーが1つしかない場合は、これまで通り見出しなしで表示する(既存記事との見た目の互換性のため)
+      const heading = groups.length > 1
+        ? `<p class="gacha-banner-title">${esc(grp.banner || `ガチャ${idx + 1}`)}</p>`
+        : '';
+      return `<div class="gacha-banner-group">${heading}${block('キャラクター', characters, '属性')}${block('武器', weapons, '武器種')}</div>`;
+    }).join('');
   }
   // ▲ここまで追加 ============================================
 
