@@ -174,22 +174,30 @@
   }
   /* ニュース欄(サイドバー)を、配信一覧など長いメインエリアをスクロールしている間も
      画面内に留まるようにする(ヘッダーの高さぶんの余白をあけて、隠れないようにしている)。
-     さらに、ニュース欄の中身が画面の高さより多い場合は、メイン側を動かさなくても
-     ニュース欄の中だけで続きをスクロールできるようにしている。 */
+     欄自体は固定サイズの箱にして、中身がその高さを超える場合は、
+     見出し("最新ニュース"「もっと見る」)は動かさず、記事一覧の部分だけを
+     箱の中で独立してスクロールさせる(flexboxで組んでいる)。 */
   @media (min-width: 901px) {
     .sidebar {
       position: sticky; top: 84px;
       max-height: calc(100vh - 84px - 20px);
+      overflow: hidden;
+    }
+    .sidebar .panel {
+      display: flex; flex-direction: column;
+      height: 100%;
+    }
+    .sidebar .panel-head { flex-shrink: 0; } /* 見出しは縮まず、常に一定の高さのまま上に留まる */
+    .sidebar .news-list {
+      flex: 1 1 auto; min-height: 0; /* flexboxで内側スクロールを効かせるために必要な指定 */
       overflow-y: auto;
     }
-    /* ニュース欄の中をスクロールしても、見出し(「最新ニュース」「もっと見る」)は
-       常に上に固定表示されるようにする(記事一覧だけがその下でスクロールする) */
-    .sidebar .panel-head {
-      position: sticky; top: 0; z-index: 1;
-      background: var(--surface);
-      padding-bottom: 10px;
-      margin-bottom: 4px;
-    }
+    /* スクロールバーを細く、控えめな見た目にする(Firefox用・Chrome/Safari用の両対応) */
+    .sidebar .news-list { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .sidebar .news-list::-webkit-scrollbar { width: 6px; }
+    .sidebar .news-list::-webkit-scrollbar-track { background: transparent; }
+    .sidebar .news-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .sidebar .news-list::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
   }
 
   /* ---------- スマホ版：ゲーム選択メニューをアイコン化 ---------- */
