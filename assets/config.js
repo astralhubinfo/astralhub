@@ -149,21 +149,21 @@ window.ASTRA_CONFIG = {
       title: 'Google Play ギフトカード',
       description: 'ガチャ課金やアプリ内課金に使えるプリペイドカード',
       url: 'https://example.com/PLACEHOLDER-google-play', // 審査後、本物のリンクに差し替え
-      enabled: false,
+      enabled: true,
     },
     {
       id: 'apple-gift-card',
       title: 'Apple Gift Card',
       description: 'App Store・iTunesでの課金に使えるプリペイドカード',
       url: 'https://example.com/PLACEHOLDER-apple-gift', // 審査後、本物のリンクに差し替え
-      enabled: false,
+      enabled: true,
     },
     {
       id: 'amazon-gift-card',
       title: 'Amazonギフト券',
       description: 'プレゼントにも使える定番の電子ギフト券',
       url: 'https://example.com/PLACEHOLDER-amazon-gift', // 審査後、本物のリンクに差し替え
-      enabled: false,
+      enabled: true,
     },
   ],
 
