@@ -127,5 +127,63 @@ window.ASTRA_CONFIG = {
     sectionOrder: 'astra_section_order_list',
     // トップページのゲームフィルター（どのゲームにチェックが入っているか）の保存先。
     gameFilter: 'astra_game_filter',
-  }
+  },
+
+  // ▼ここから追加：アフィリエイト設定 ==========================================
+  // 審査が通っていない間は、すべて enabled: false のままでOKです（何も表示されません）。
+  // 審査が通ったら、対象の url を本物のアフィリエイトリンクに書き換えて、
+  // enabled を true に変更するだけで、サイトに反映されます（コードの変更は不要です）。
+  //
+  // ▼AFFILIATE_CARDS の各項目の意味
+  //   id          : カードを区別するための名前（自由に付けてOK、重複しなければ良い）
+  //   title       : カードに表示する商品名
+  //   description : カードに表示する短い説明文
+  //   url         : リンク先（審査前は仮のURLのままでOK）
+  //   enabled     : このカード自体を使うかどうか（false=使わない）
+  //
+  // トップページの「おすすめカード」、記事下の関連リンクは、
+  // ここに登録した中から enabled: true のものだけをランダム（またはローテーション）で表示します。
+  AFFILIATE_CARDS: [
+    {
+      id: 'google-play-card',
+      title: 'Google Play ギフトカード',
+      description: 'ガチャ課金やアプリ内課金に使えるプリペイドカード',
+      url: 'https://example.com/PLACEHOLDER-google-play', // 審査後、本物のリンクに差し替え
+      enabled: false,
+    },
+    {
+      id: 'apple-gift-card',
+      title: 'Apple Gift Card',
+      description: 'App Store・iTunesでの課金に使えるプリペイドカード',
+      url: 'https://example.com/PLACEHOLDER-apple-gift', // 審査後、本物のリンクに差し替え
+      enabled: false,
+    },
+    {
+      id: 'amazon-gift-card',
+      title: 'Amazonギフト券',
+      description: 'プレゼントにも使える定番の電子ギフト券',
+      url: 'https://example.com/PLACEHOLDER-amazon-gift', // 審査後、本物のリンクに差し替え
+      enabled: false,
+    },
+  ],
+
+  // トップページ（index.html）の「おすすめカード」表示設定
+  // 表示位置：配信・人気動画・公式チャンネル・新着動画のブロックのすぐ後、ニュース欄の直前
+  AFFILIATE_TOP_CARD: {
+    enabled: false, // 審査が通ったら true に変更
+    heading: 'おすすめ',
+  },
+
+  // 記事詳細（article.html）の一番下に表示する関連リンクの設定
+  AFFILIATE_ARTICLE_LINK: {
+    enabled: false, // 審査が通ったら true に変更
+    heading: '関連リンク',
+  },
+
+  // 全ページ共通フッターに表示する、控えめなテキストリンクの設定
+  AFFILIATE_FOOTER: {
+    enabled: ture, // 審査が通ったら true に変更
+    text: 'PR',
+  },
+  // ▲ここまで追加 ============================================
 };

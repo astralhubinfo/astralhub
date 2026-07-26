@@ -6,7 +6,7 @@
  * 表示に関わる状態（フィルターの選択状態など）は各ページ側で管理する。
  */
 (function () {
-  const { CATEGORY_LABEL, STORAGE_KEYS } = window.ASTRA_CONFIG;
+  const { CATEGORY_LABEL, STORAGE_KEYS, AFFILIATE_CARDS, AFFILIATE_TOP_CARD, AFFILIATE_ARTICLE_LINK, AFFILIATE_FOOTER } = window.ASTRA_CONFIG;
 
   // 絵文字は環境によって表示が崩れる(豆腐文字・別の絵柄になる等)ため、
   // カード上のちょっとした目印にはこの線画アイコン(SVG)を使う。
@@ -557,6 +557,54 @@
     return cachedSchedule !== null ? cachedSchedule : [];
   }
 
+  // ▼ここから追加:アフィリエイトカード表示 ============================================
+  // config.js の AFFILIATE_CARDS のうち、enabled:true になっているものだけを対象に、
+  // ランダムで1枚選んで返す。表示できるカードが1件も無い場合は null を返す
+  // (審査中で全部 enabled:false の間は、ここが常に null になり、何も表示されない)。
+  function pickAffiliateCard(){
+    const cards = (AFFILIATE_CARDS || []).filter(c => c.enabled);
+    if (cards.length === 0) return null;
+    return cards[Math.floor(Math.random() * cards.length)];
+  }
+
+  // トップページの「おすすめカード」用HTML(配信・人気動画・公式チャンネル・新着動画の
+  // ブロックのすぐ後、ニュース欄の直前に差し込む想定)。
+  // 表示できない場合(設定OFF、または対象カードが無い場合)は空文字を返すので、
+  // 呼び出し側は戻り値が空文字だった場合は何も表示しないでください。
+  function affiliateTopCardHtml(){
+    if (!AFFILIATE_TOP_CARD || !AFFILIATE_TOP_CARD.enabled) return '';
+    const card = pickAffiliateCard();
+    if (!card) return '';
+    return `<section class="affiliate-block affiliate-top-card">
+      <p class="affiliate-heading">${AFFILIATE_TOP_CARD.heading || 'おすすめ'}<span class="affiliate-pr-mark">PR</span></p>
+      <a class="media-card affiliate-card" href="${card.url}" target="_blank" rel="noopener noreferrer sponsored">
+        <div class="media-thumb landscape affiliate-thumb"><span class="affiliate-thumb-label">${card.title}</span></div>
+        <p class="card-title">${card.title}</p>
+        <div class="card-meta"><span>${card.description}</span></div>
+      </a>
+    </section>`;
+  }
+
+  // 記事詳細(article.html)の本文いちばん下に差し込む、関連リンク用HTML。
+  function affiliateArticleLinkHtml(){
+    if (!AFFILIATE_ARTICLE_LINK || !AFFILIATE_ARTICLE_LINK.enabled) return '';
+    const card = pickAffiliateCard();
+    if (!card) return '';
+    return `<div class="affiliate-block affiliate-article-link">
+      <p class="affiliate-heading">${AFFILIATE_ARTICLE_LINK.heading || '関連リンク'}<span class="affiliate-pr-mark">PR</span></p>
+      <a href="${card.url}" target="_blank" rel="noopener noreferrer sponsored">${card.title}｜${card.description}</a>
+    </div>`;
+  }
+
+  // 全ページ共通フッターに差し込む、控えめな1行リンク用HTML。
+  function affiliateFooterHtml(){
+    if (!AFFILIATE_FOOTER || !AFFILIATE_FOOTER.enabled) return '';
+    const card = pickAffiliateCard();
+    if (!card) return '';
+    return `<a class="affiliate-footer-link" href="${card.url}" target="_blank" rel="noopener noreferrer sponsored">${AFFILIATE_FOOTER.text || 'PR'}：${card.title}</a>`;
+  }
+  // ▲ここまで追加 ============================================
+
   window.ASTRA_DATA = {
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
@@ -564,5 +612,6 @@
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
+    affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateFooterHtml,
   };
 })();

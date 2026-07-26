@@ -474,6 +474,30 @@
     font-size: 10.5px; font-weight: 700;
     padding: 3px 7px; border-radius: 5px;
   }
+
+  /* ---------- アフィリエイト表示 ---------- */
+  /* トップページ最後の「おすすめカード」欄。他のカードと同じ見た目(.media-card)を使い、
+     広告っぽさを出さずに1枚だけ表示する。 */
+  .affiliate-block { margin-bottom: 20px; }
+  .affiliate-top-card .affiliate-card { max-width: 280px; }
+  .affiliate-heading {
+    font-size: 12px; font-weight: 700; color: var(--text-faint);
+    display: flex; align-items: center; gap: 6px; margin: 0 0 10px;
+  }
+  .affiliate-pr-mark {
+    font-size: 10px; font-weight: 700; color: var(--text-faint);
+    border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px;
+  }
+  .affiliate-thumb {
+    background: linear-gradient(135deg, var(--surface-strong), var(--border));
+  }
+  .affiliate-thumb-label {
+    font-size: 13px; font-weight: 700; color: var(--text-secondary);
+    text-align: center; padding: 0 12px;
+  }
+  /* フッターのPRリンクは、他のフッターリンクより控えめな色にしておく */
+  .affiliate-footer-link { color: var(--text-faint) !important; font-weight: 500; }
+  .affiliate-footer-link:hover { color: var(--accent) !important; }
 </style>
 </head>
 <body>
@@ -533,6 +557,7 @@
     <span>&copy; 2026 AstralHub</span>
     <a href="contact.html">管理人への問い合わせ</a>
     <a href="privacy.html">プライバシーポリシー</a>
+    <span id="footerAffiliate"></span>
   </div>
 </footer>
 
@@ -564,6 +589,7 @@ const {
   getFilteredData, refreshYouTubeData, refreshNewsData,
   isEligibleForPopular,
   refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
+  affiliateTopCardHtml, affiliateFooterHtml,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -637,6 +663,10 @@ function saveSectionOrderList(arr){
 }
 let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','official','latest']
 let mobileTab = 'main';
+
+// フッターのPRリンクは、他の欄と違って自動更新のたびに変わる必要が無いため、
+// ページを開いた時に1回だけ表示する(設定がOFF、または対象カードが無い場合は何も表示されない)。
+document.getElementById('footerAffiliate').innerHTML = affiliateFooterHtml();
 
 /* =========================================================
    3. 描画
@@ -820,7 +850,8 @@ function renderMainContent(){
     official: officialSectionHtml(officialVideos, loading),
     latest: latestSectionHtml(generalVideos, loading),
   };
-  el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('');
+  // 表示順(sectionOrderArr)がどう並び替えられても、おすすめカードは常に一番最後に固定表示する
+  el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
 
   document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
     btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
