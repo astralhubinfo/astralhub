@@ -6,7 +6,7 @@
  * 表示に関わる状態（フィルターの選択状態など）は各ページ側で管理する。
  */
 (function () {
-  const { CATEGORY_LABEL, STORAGE_KEYS, AFFILIATE_CARDS, AFFILIATE_TOP_CARD, AFFILIATE_ARTICLE_LINK, AFFILIATE_SIDEBAR_LINK } = window.ASTRA_CONFIG;
+  const { CATEGORY_LABEL, STORAGE_KEYS, AFFILIATE_CARDS, AFFILIATE_TOP_CARD, AFFILIATE_ARTICLE_LINK, AFFILIATE_INTRO_LINK } = window.ASTRA_CONFIG;
 
   // 絵文字は環境によって表示が崩れる(豆腐文字・別の絵柄になる等)ため、
   // カード上のちょっとした目印にはこの線画アイコン(SVG)を使う。
@@ -596,14 +596,16 @@
     </div>`;
   }
 
-  // トップページのサイドバー最上部(ニュース欄の真上)に差し込む、テキストのみのリンク用HTML。
+  // トップページのイントロ文のすぐ下・LIVE配信セクションの直前に差し込む、テキストのみのリンク用HTML。
   // 記事下の関連リンクと同じ見た目(見出し+PRマーク+テキストリンク)を使う。
-  function affiliateSidebarLinkHtml(){
-    if (!AFFILIATE_SIDEBAR_LINK || !AFFILIATE_SIDEBAR_LINK.enabled) return '';
+  // パソコン・スマホどちらでも必ず表示されるメインエリアの中にあるため、
+  // サイドバーが非表示になるスマホ表示でも見える。
+  function affiliateIntroLinkHtml(){
+    if (!AFFILIATE_INTRO_LINK || !AFFILIATE_INTRO_LINK.enabled) return '';
     const card = pickAffiliateCard();
     if (!card) return '';
-    return `<div class="affiliate-block affiliate-sidebar-link">
-      <p class="affiliate-heading">${AFFILIATE_SIDEBAR_LINK.heading || 'おすすめ'}<span class="affiliate-pr-mark">PR</span></p>
+    return `<div class="affiliate-block affiliate-intro-link">
+      <p class="affiliate-heading">${AFFILIATE_INTRO_LINK.heading || 'おすすめ'}<span class="affiliate-pr-mark">PR</span></p>
       <a href="${card.url}" target="_blank" rel="noopener noreferrer sponsored">${card.title}｜${card.description}</a>
     </div>`;
   }
@@ -617,6 +619,6 @@
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
-    affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateSidebarLinkHtml,
+    affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateIntroLinkHtml,
   };
 })();

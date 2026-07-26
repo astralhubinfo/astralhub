@@ -495,9 +495,10 @@
     font-size: 13px; font-weight: 700; color: var(--text-secondary);
     text-align: center; padding: 0 12px;
   }
-  /* サイドバー最上部のテキストリンク版(記事下の関連リンクと同じスタイル) */
-  .affiliate-sidebar-link { margin-bottom: 14px; }
-  .affiliate-sidebar-link a { font-size: 13px; color: var(--accent); font-weight: 500; }
+  /* イントロ文の直後・LIVE配信セクションの直前に表示するテキストリンク版
+     (記事下の関連リンクと同じスタイル) */
+  .affiliate-intro-link { margin: 0 0 18px; }
+  .affiliate-intro-link a { font-size: 13px; color: var(--accent); font-weight: 500; }
 </style>
 </head>
 <body>
@@ -542,7 +543,6 @@
   <main id="mainContent"></main>
 
   <aside class="sidebar">
-    <div id="sidebarAffiliate"></div>
     <div class="panel" id="news-section">
       <div class="panel-head">
         <span class="panel-title">最新ニュース</span>
@@ -589,7 +589,7 @@ const {
   getFilteredData, refreshYouTubeData, refreshNewsData,
   isEligibleForPopular,
   refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
-  affiliateTopCardHtml, affiliateSidebarLinkHtml,
+  affiliateTopCardHtml, affiliateIntroLinkHtml,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -664,10 +664,6 @@ function saveSectionOrderList(arr){
 let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','official','latest']
 let mobileTab = 'main';
 
-// サイドバー上部のPRリンクは、ニュースのように自動更新のたびに変わる必要が無いため、
-// ページを開いた時に1回だけ表示する(設定がOFF、または対象カードが無い場合は何も表示されない)。
-document.getElementById('sidebarAffiliate').innerHTML = affiliateSidebarLinkHtml();
-
 /* =========================================================
    3. 描画
    ========================================================= */
@@ -705,9 +701,12 @@ function chipLabelFor(g){
 }
 
 function renderFilterBar(){
+  // 「管理人」は配信・動画を持たないニュース専用の分類のため、フィルターチップには出さない
+  // (ニュース自体は今まで通り表示され、絞り込みの選択肢からのみ除外される)
+  const filterableGames = GAMES.filter(g => g.id !== 'admin');
   const allActive = activeGames.size === GAMES.length;
   let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1"><span class="chip-all-full">すべて</span><span class="chip-all-short">全</span></button>`;
-  html += GAMES.map(g => {
+  html += filterableGames.map(g => {
     const active = activeGames.has(g.id);
     const initial = (g.name || '?').charAt(0);
     return `<button class="game-chip ${active?'active':''}" data-game="${g.id}" title="${g.name}">
@@ -850,8 +849,9 @@ function renderMainContent(){
     official: officialSectionHtml(officialVideos, loading),
     latest: latestSectionHtml(generalVideos, loading),
   };
-  // 表示順(sectionOrderArr)がどう並び替えられても、おすすめカードは常に一番最後に固定表示する
-  el.innerHTML = sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
+  // イントロ文の直後・LIVE配信セクションの直前にPRリンクを表示し、
+  // 表示順(sectionOrderArr)がどう並び替えられても、おすすめカードは一番最後に固定表示する
+  el.innerHTML = affiliateIntroLinkHtml() + sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
 
   document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
     btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
