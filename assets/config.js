@@ -97,6 +97,9 @@ window.ASTRA_CONFIG = {
     { id: 'zzz',     name: 'ゼンレスゾーンゼロ', color: '#FF8A2A', icon: 'assets/games/zzz.svg' },
     { id: 'ww',      name: '鳴潮',             color: '#E6B422', icon: 'assets/games/ww.svg' },
     { id: 'nte',     name: 'NTE',             color: '#8B5CF6', icon: 'assets/games/nte.svg' },
+    // ★ゲームではなく、運営(管理人)からのお知らせ用の特別枠。
+    // 　配信・動画の対象チャンネルは無いため、ニュース記事の分類としてのみ使う想定。
+    { id: 'admin',   name: '管理人',           color: '#6B7280', icon: 'assets/games/admin.svg' },
   ],
   CATEGORY_LABEL: {
     character:   '新キャラ',
@@ -105,7 +108,6 @@ window.ASTRA_CONFIG = {
     code:        'コード',
     event:       'イベント',
     maintenance: 'メンテ',
-    admin:       '管理人',
     gacha:       'ガチャ',
   },
   SECTION_LABELS: {
