@@ -444,25 +444,22 @@
   .order-btn:disabled { opacity: 0.3; cursor: default; }
 
   /* ---------- Site intro（トップページの紹介文） ---------- */
+  /* メインカラムの中に収まるようにしたため、独自の横幅・中央寄せ指定は不要になった。
+     あわせて、サイドバー(ニュース欄)の開始位置を上げるため、少しコンパクトにしている。 */
   .site-intro {
-    max-width: 1240px;
-    margin: 0 auto;
-    padding: 0 20px 12px;
+    margin: 0 0 16px;
   }
   .site-intro-catch {
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--text-secondary);
-    margin: 0 0 4px;
+    margin: 0 0 3px;
   }
   .site-intro-text {
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: 11.5px;
+    line-height: 1.5;
     color: var(--text-faint);
     margin: 0;
-  }
-  @media (max-width: 900px) {
-    .site-intro { padding: 0 14px 10px; }
   }
 
   /* ---------- 公式チャンネルの配信予定(ヘッダー直下のお知らせ欄・まもなく配信カード) ---------- */
@@ -561,11 +558,6 @@
 </header>
 
 <div class="schedule-announce-wrap" id="scheduleAnnounceWrap"></div>
-
-<section class="site-intro">
-  <p class="site-intro-catch">探す時間を、見る時間へ。</p>
-  <p class="site-intro-text">AstralHubは、原神・崩壊スターレイル・ゼンレスゾーンゼロ・鳴潮・NTEなど人気ゲームの生放送・動画・最新ニュースをまとめてチェックできる情報サイトです。<br>あちこちのサイトを探し回る時間をなくし、見たい瞬間にすぐたどり着けることを目指しています。</p>
-</section>
 
 <div class="page">
   <main id="mainContent"></main>
@@ -696,6 +688,11 @@ let mobileTab = 'main';
    3. 描画
    ========================================================= */
 const UPDATE_NOTE_ICON_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align:-1.5px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
+// トップページの紹介文(メインカラムの一番上に差し込む、内容が変わらない固定のHTML)
+const SITE_INTRO_HTML = `<section class="site-intro">
+  <p class="site-intro-catch">探す時間を、見る時間へ。</p>
+  <p class="site-intro-text">AstralHubは、原神・崩壊スターレイル・ゼンレスゾーンゼロ・鳴潮・NTEなど人気ゲームの生放送・動画・最新ニュースをまとめてチェックできる情報サイトです。<br>あちこちのサイトを探し回る時間をなくし、見たい瞬間にすぐたどり着けることを目指しています。</p>
+</section>`;
 // LIVE・人気動画・新着動画は自動取得の対象なので、更新頻度の注釈を出す
 // freshKind: 表示する更新頻度の文言を決める('live'=5分ごと、それ以外=30分ごと)
 function updateNoteHtml(freshKind, sectionKey){
@@ -877,9 +874,10 @@ function renderMainContent(){
     official: officialSectionHtml(officialVideos, loading),
     latest: latestSectionHtml(generalVideos, loading),
   };
+
   // イントロ文の直後・LIVE配信セクションの直前にPRリンクを表示し、
   // 表示順(sectionOrderArr)がどう並び替えられても、おすすめカードは一番最後に固定表示する
-  el.innerHTML = affiliateIntroLinkHtml() + sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
+  el.innerHTML = SITE_INTRO_HTML + affiliateIntroLinkHtml() + sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
 
   document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
     btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
