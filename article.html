@@ -136,9 +136,6 @@
     border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px;
   }
   .affiliate-article-link a { font-size: 13px; color: var(--accent); font-weight: 500; }
-  /* フッターのPRリンクは、他のフッターリンクより控えめな色にしておく */
-  .affiliate-footer-link { color: var(--text-faint) !important; font-weight: 500; }
-  .affiliate-footer-link:hover { color: var(--accent) !important; }
 </style>
 </head>
 <body>
@@ -157,7 +154,6 @@
     <span>&copy; 2026 AstralHub</span>
     <a href="contact.html">管理人への問い合わせ</a>
     <a href="privacy.html">プライバシーポリシー</a>
-    <span id="footerAffiliate"></span>
   </div>
 </footer>
 
@@ -165,11 +161,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { CATEGORY_LABEL } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, affiliateArticleLinkHtml, affiliateFooterHtml } = window.ASTRA_DATA;
-
-// フッターのPRリンクは記事ごとに変わる必要が無いため、ページを開いた時に1回だけ表示する
-// (設定がOFF、または対象カードが無い場合は何も表示されない)。
-document.getElementById('footerAffiliate').innerHTML = affiliateFooterHtml();
+const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, affiliateArticleLinkHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const id = params.get('id');

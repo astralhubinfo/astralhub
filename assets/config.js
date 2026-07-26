@@ -170,20 +170,14 @@ window.ASTRA_CONFIG = {
   // トップページ（index.html）の「おすすめカード」表示設定
   // 表示位置：配信・人気動画・公式チャンネル・新着動画のブロックのすぐ後、ニュース欄の直前
   AFFILIATE_TOP_CARD: {
-    enabled: false, // 審査が通ったら true に変更
+    enabled: true,
     heading: 'おすすめ',
   },
 
   // 記事詳細（article.html）の一番下に表示する関連リンクの設定
   AFFILIATE_ARTICLE_LINK: {
-    enabled: false, // 審査が通ったら true に変更
+    enabled: true,
     heading: '関連リンク',
-  },
-
-  // 全ページ共通フッターに表示する、控えめなテキストリンクの設定
-  AFFILIATE_FOOTER: {
-    enabled: true, // 審査が通ったら true に変更
-    text: 'PR',
   },
   // ▲ここまで追加 ============================================
 };

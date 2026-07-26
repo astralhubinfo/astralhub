@@ -6,7 +6,7 @@
  * 表示に関わる状態（フィルターの選択状態など）は各ページ側で管理する。
  */
 (function () {
-  const { CATEGORY_LABEL, STORAGE_KEYS, AFFILIATE_CARDS, AFFILIATE_TOP_CARD, AFFILIATE_ARTICLE_LINK, AFFILIATE_FOOTER } = window.ASTRA_CONFIG;
+  const { CATEGORY_LABEL, STORAGE_KEYS, AFFILIATE_CARDS, AFFILIATE_TOP_CARD, AFFILIATE_ARTICLE_LINK } = window.ASTRA_CONFIG;
 
   // 絵文字は環境によって表示が崩れる(豆腐文字・別の絵柄になる等)ため、
   // カード上のちょっとした目印にはこの線画アイコン(SVG)を使う。
@@ -596,13 +596,6 @@
     </div>`;
   }
 
-  // 全ページ共通フッターに差し込む、控えめな1行リンク用HTML。
-  function affiliateFooterHtml(){
-    if (!AFFILIATE_FOOTER || !AFFILIATE_FOOTER.enabled) return '';
-    const card = pickAffiliateCard();
-    if (!card) return '';
-    return `<a class="affiliate-footer-link" href="${card.url}" target="_blank" rel="noopener noreferrer sponsored">${AFFILIATE_FOOTER.text || 'PR'}：${card.title}</a>`;
-  }
   // ▲ここまで追加 ============================================
 
   window.ASTRA_DATA = {
@@ -612,6 +605,6 @@
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
     refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
-    affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateFooterHtml,
+    affiliateTopCardHtml, affiliateArticleLinkHtml,
   };
 })();

@@ -495,9 +495,6 @@
     font-size: 13px; font-weight: 700; color: var(--text-secondary);
     text-align: center; padding: 0 12px;
   }
-  /* フッターのPRリンクは、他のフッターリンクより控えめな色にしておく */
-  .affiliate-footer-link { color: var(--text-faint) !important; font-weight: 500; }
-  .affiliate-footer-link:hover { color: var(--accent) !important; }
 </style>
 </head>
 <body>
@@ -557,7 +554,6 @@
     <span>&copy; 2026 AstralHub</span>
     <a href="contact.html">管理人への問い合わせ</a>
     <a href="privacy.html">プライバシーポリシー</a>
-    <span id="footerAffiliate"></span>
   </div>
 </footer>
 
@@ -589,7 +585,7 @@ const {
   getFilteredData, refreshYouTubeData, refreshNewsData,
   isEligibleForPopular,
   refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
-  affiliateTopCardHtml, affiliateFooterHtml,
+  affiliateTopCardHtml,
 } = window.ASTRA_DATA;
 
 /* =========================================================
@@ -663,10 +659,6 @@ function saveSectionOrderList(arr){
 }
 let sectionOrderArr = loadSectionOrderList(); // 例: ['popular','live','official','latest']
 let mobileTab = 'main';
-
-// フッターのPRリンクは、他の欄と違って自動更新のたびに変わる必要が無いため、
-// ページを開いた時に1回だけ表示する(設定がOFF、または対象カードが無い場合は何も表示されない)。
-document.getElementById('footerAffiliate').innerHTML = affiliateFooterHtml();
 
 /* =========================================================
    3. 描画
