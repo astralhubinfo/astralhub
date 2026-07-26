@@ -181,11 +181,12 @@
     .sidebar {
       position: sticky; top: 84px;
       max-height: calc(100vh - 84px - 20px);
+      display: flex; flex-direction: column;
       overflow: hidden;
     }
     .sidebar .panel {
       display: flex; flex-direction: column;
-      height: 100%;
+      flex: 1 1 auto; min-height: 0; /* 「高さ100%」ではなく、この指定でflexboxに正しく高さを計算させる */
     }
     .sidebar .panel-head { flex-shrink: 0; } /* 見出しは縮まず、常に一定の高さのまま上に留まる */
     .sidebar .news-list {
