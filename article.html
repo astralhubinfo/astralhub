@@ -203,11 +203,11 @@ pageEl.innerHTML = loadingHtml();
       ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}
       ${item.cat === 'gacha' ? gachaItemsTableHtml(item.gachaItems) : ''}
       ${item.summary ? `<p class="article-body">${item.summary}</p>` : ''}
+      ${affiliateArticleLinkHtml()}
       <div class="source-block">
         <div class="source-label">Source</div>
         ${sourceHtml}
       </div>
-      ${affiliateArticleLinkHtml()}
     </div>
   `;
 
