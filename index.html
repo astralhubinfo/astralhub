@@ -179,8 +179,8 @@
      箱の中で独立してスクロールさせる(flexboxで組んでいる)。 */
   @media (min-width: 901px) {
     .sidebar {
-      position: sticky; top: 84px;
-      max-height: calc(100vh - 84px - 20px);
+      position: sticky; top: var(--header-h, 140px); /* JS側で実測した高さに自動調整される(初期値は概算) */
+      max-height: calc(100vh - var(--header-h, 140px) - 20px);
       display: flex; flex-direction: column;
       overflow: hidden;
     }
@@ -925,6 +925,21 @@ function renderAll(){
   renderSidebar();
 }
 renderAll();
+
+// ヘッダー(ロゴ+ゲーム絞り込みチップ)の実際の高さを測り、ニュース欄の固定位置に反映する。
+// ゲーム数が変わってチップの行数が変わっても、決め打ちの数値ではなく実測値で自動調整される。
+function updateHeaderOffset(){
+  const headerEl = document.querySelector('.site-header');
+  if (headerEl) {
+    document.documentElement.style.setProperty('--header-h', headerEl.offsetHeight + 'px');
+  }
+}
+updateHeaderOffset();
+let resizeRenderTimer2 = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeRenderTimer2);
+  resizeRenderTimer2 = setTimeout(updateHeaderOffset, 150);
+});
 
 // ニュースの「ゲームタグ」「ジャンルタグ」がクリックされたら、そのタグの一覧ページへ移動する。
 // (ページ内のどこに表示されるタグでも拾えるよう、documentに1回だけ登録している)
