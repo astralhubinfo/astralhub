@@ -182,7 +182,7 @@ window.ASTRA_CONFIG = {
 
   // 全ページ共通フッターに表示する、控えめなテキストリンクの設定
   AFFILIATE_FOOTER: {
-    enabled: ture, // 審査が通ったら true に変更
+    enabled: true, // 審査が通ったら true に変更
     text: 'PR',
   },
   // ▲ここまで追加 ============================================
