@@ -12,31 +12,11 @@ export default {
       }
     }
 
-    // ===== 1. パスワードチェック(今までと同じ) =====
-    const authHeader = request.headers.get("Authorization");
-    let isAuthenticated = false;
-
-    if (authHeader) {
-      const [scheme, encoded] = authHeader.split(" ");
-      if (scheme === "Basic" && encoded) {
-        const decoded = atob(encoded);
-        const separatorIndex = decoded.indexOf(":");
-        const user = decoded.substring(0, separatorIndex);
-        const pass = decoded.substring(separatorIndex + 1);
-        if (user === env.BASIC_AUTH_USER && pass === env.BASIC_AUTH_PASS) {
-          isAuthenticated = true;
-        }
-      }
-    }
-
-    if (!isAuthenticated) {
-      return new Response("このサイトはただいま準備中です。", {
-        status: 401,
-        headers: {
-          "WWW-Authenticate": 'Basic realm="AstralHub - Preview"',
-        },
-      });
-    }
+    // ===== 1. パスワードチェック =====
+    // 開発中はBasic認証(ブラウザのID/パスワード入力ダイアログ)でサイト全体を保護していましたが、
+    // 開発が一段落し、アフィリエイト申請などサイトを一般公開する必要が出てきたため解除しました。
+    // (env.BASIC_AUTH_USER / env.BASIC_AUTH_PASS は他の場所では使っていないため、
+    //  Cloudflare側のSecrets設定はそのまま残しておいても支障はありません)
 
     // ===== 2. チャンネル登録の受付窓口(API) =====
 
