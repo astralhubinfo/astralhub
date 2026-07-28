@@ -283,9 +283,12 @@ function chipLabelFor(g){
 
 function renderFilterBar(){
   if (type === 'search') { document.getElementById('filterBar').innerHTML = ''; return; }
+  // 「管理人」は配信・動画を持たないニュース専用の分類のため、フィルターチップには出さない
+  // (ニュース自体は今まで通り表示され、絞り込みの選択肢からのみ除外される。index.htmlと同じ扱い)
+  const filterableGames = GAMES.filter(g => g.id !== 'admin');
   const allActive = activeGames.size === GAMES.length;
   let html = `<button class="game-chip chip-all ${allActive ? '' : 'inactive'}" data-all="1">すべて</button>`;
-  html += GAMES.map(g => {
+  html += filterableGames.map(g => {
     const active = activeGames.has(g.id);
     return `<button class="game-chip ${active?'active':''}" data-game="${g.id}" title="${g.name}">
       <span class="swatch" style="background:${g.color}"></span><span class="chip-label">${chipLabelFor(g)}</span>
