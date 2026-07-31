@@ -360,6 +360,7 @@
       gachaEnd: normalizeDate(row.gachaEnd),
       gachaItems: parseGachaItems(row.gachaItems),
       codeItems: parseCodeItems(row.codeItems),
+      archiveUrl: row.archiveUrl || '',
     };
   }
 
@@ -476,6 +477,29 @@
         <thead><tr><th>コード</th><th>報酬</th><th></th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
+    </div>`;
+  }
+
+  // YouTubeの動画URL(watch?v=形式・youtu.be形式・live/形式のいずれも)から、
+  // 動画ID(11文字の英数字)だけを取り出す。取り出せなければnullを返す。
+  function extractYoutubeVideoId(url){
+    if (!url) return null;
+    const match = String(url).match(/(?:youtube\.com\/(?:watch\?v=|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : null;
+  }
+
+  // 生放送記事の「配信アーカイブ」を埋め込み再生できるHTMLを返す(記事詳細ページで使う)。
+  // URLからYouTubeの動画IDが取り出せない場合(空欄、または対応していない形式のURL)は
+  // 何も表示しない(空文字を返す)。
+  function streamArchiveEmbedHtml(url){
+    const videoId = extractYoutubeVideoId(url);
+    if (!videoId) return '';
+    return `<div class="archive-embed-block">
+      <div class="archive-embed-wrap">
+        <iframe src="https://www.youtube.com/embed/${videoId}" title="配信アーカイブ"
+          frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+      </div>
     </div>`;
   }
   // ▲ここまで追加 ============================================
@@ -647,6 +671,7 @@
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
     gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel, codeItemsTableHtml,
+    streamArchiveEmbedHtml,
     refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
     affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateIntroLinkHtml,

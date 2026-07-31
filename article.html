@@ -132,6 +132,11 @@
   }
   .code-redeem-btn:hover { background: var(--accent); color: #fff; }
 
+  /* 配信アーカイブの埋め込み(16:9比率を保ったまま、横幅いっぱいに表示する) */
+  .archive-embed-block { margin: 0 0 22px; }
+  .archive-embed-wrap { position: relative; width: 100%; padding-top: 56.25%; border-radius: var(--radius-md); overflow: hidden; background: #000; }
+  .archive-embed-wrap iframe { position: absolute; top:0; left:0; width:100%; height:100%; border:0; }
+
   .not-found { text-align:center; padding: 60px 20px; color: var(--text-faint); }
   .not-found a { color: var(--accent); font-weight:500; }
 
@@ -179,7 +184,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { CATEGORY_LABEL } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, codeItemsTableHtml, affiliateArticleLinkHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, codeItemsTableHtml, streamArchiveEmbedHtml, affiliateArticleLinkHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const id = params.get('id');
@@ -221,6 +226,7 @@ pageEl.innerHTML = loadingHtml();
       ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}
       ${item.cat === 'gacha' ? gachaItemsTableHtml(item.gachaItems) : ''}
       ${item.cat === 'code' ? codeItemsTableHtml(item.codeItems) : ''}
+      ${item.cat === 'stream' ? streamArchiveEmbedHtml(item.archiveUrl) : ''}
       ${item.summary ? `<p class="article-body">${item.summary}</p>` : ''}
       ${affiliateArticleLinkHtml()}
       <div class="source-block">

@@ -162,7 +162,7 @@ export default {
         const { results } = await env.DB.prepare(
           `SELECT id, game, cat, pinned, title, summary, url, published_at AS publishedAt,
                   gacha_start AS gachaStart, gacha_end AS gachaEnd, gacha_items AS gachaItems,
-                  code_items AS codeItems,
+                  code_items AS codeItems, archive_url AS archiveUrl,
                   COALESCE(status, 'published') AS status
            FROM news
            ${whereClause}
@@ -452,7 +452,7 @@ async function saveNewsItem(db, item) {
     await db
       .prepare(
         `UPDATE news SET game=?, cat=?, pinned=?, title=?, summary=?, url=?,
-                gacha_start=?, gacha_end=?, gacha_items=?, code_items=?, status=? WHERE id=?`
+                gacha_start=?, gacha_end=?, gacha_items=?, code_items=?, archive_url=?, status=? WHERE id=?`
       )
       .bind(
         item.game || "",
@@ -465,6 +465,7 @@ async function saveNewsItem(db, item) {
         item.gachaEnd || "",
         gachaItemsJson,
         codeItemsJson,
+        item.archiveUrl || "",
         status,
         item.id
       )
@@ -476,8 +477,8 @@ async function saveNewsItem(db, item) {
   await db
     .prepare(
       `INSERT INTO news (id, game, cat, pinned, title, summary, url, published_at,
-              gacha_start, gacha_end, gacha_items, code_items, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`
+              gacha_start, gacha_end, gacha_items, code_items, archive_url, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -491,6 +492,7 @@ async function saveNewsItem(db, item) {
       item.gachaEnd || "",
       gachaItemsJson,
       codeItemsJson,
+      item.archiveUrl || "",
       status
     )
     .run();
