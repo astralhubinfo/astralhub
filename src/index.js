@@ -162,6 +162,7 @@ export default {
         const { results } = await env.DB.prepare(
           `SELECT id, game, cat, pinned, title, summary, url, published_at AS publishedAt,
                   gacha_start AS gachaStart, gacha_end AS gachaEnd, gacha_items AS gachaItems,
+                  code_items AS codeItems,
                   COALESCE(status, 'published') AS status
            FROM news
            ${whereClause}
@@ -442,15 +443,16 @@ export default {
 // idが指定されていれば、そのidの行を更新する(登録日時は変えない)。
 // idが指定されていなければ、新しいidを発行して新規登録する(登録日時は今の時刻にする)。
 async function saveNewsItem(db, item) {
-  // ガチャのピックアップ一覧は、配列のまま保存できないため、文字列(JSON)に変換して保存する
+  // ガチャのピックアップ一覧・コード一覧は、配列のまま保存できないため、文字列(JSON)に変換して保存する
   const gachaItemsJson = JSON.stringify(Array.isArray(item.gachaItems) ? item.gachaItems : []);
+  const codeItemsJson = JSON.stringify(Array.isArray(item.codeItems) ? item.codeItems : []);
   const status = item.status === "draft" ? "draft" : "published";
 
   if (item.id) {
     await db
       .prepare(
         `UPDATE news SET game=?, cat=?, pinned=?, title=?, summary=?, url=?,
-                gacha_start=?, gacha_end=?, gacha_items=?, status=? WHERE id=?`
+                gacha_start=?, gacha_end=?, gacha_items=?, code_items=?, status=? WHERE id=?`
       )
       .bind(
         item.game || "",
@@ -462,6 +464,7 @@ async function saveNewsItem(db, item) {
         item.gachaStart || "",
         item.gachaEnd || "",
         gachaItemsJson,
+        codeItemsJson,
         status,
         item.id
       )
@@ -473,8 +476,8 @@ async function saveNewsItem(db, item) {
   await db
     .prepare(
       `INSERT INTO news (id, game, cat, pinned, title, summary, url, published_at,
-              gacha_start, gacha_end, gacha_items, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)`
+              gacha_start, gacha_end, gacha_items, code_items, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -487,6 +490,7 @@ async function saveNewsItem(db, item) {
       item.gachaStart || "",
       item.gachaEnd || "",
       gachaItemsJson,
+      codeItemsJson,
       status
     )
     .run();

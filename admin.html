@@ -74,6 +74,14 @@
   /* ▼チャンネル発掘機能 */
   .submit-btn:disabled { background: var(--text-faint); cursor: default; }
   .gacha-only { display:none; }
+  .code-only { display:none; }
+  .code-item-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .code-item-row input[type="text"] { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
+  .code-item-row .code-url-input { flex:1.4; }
+  .code-item-row .remove-item-btn {
+    border:1px solid var(--border); background:var(--bg); color: var(--live); border-radius: var(--radius-sm);
+    padding: 8px 11px; font-size:13px; flex:none;
+  }
   .gacha-item-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
   .gacha-item-row input[type="text"] { flex:1; padding: 9px 10px; border:1px solid var(--border); border-radius: var(--radius-sm); }
   .gacha-item-row select.gacha-kind { flex:none; width:84px; padding: 9px 6px; border:1px solid var(--border); border-radius: var(--radius-sm); }
@@ -157,7 +165,21 @@
 <script>
 const { GAMES, CATEGORY_LABEL, STORAGE_KEYS, ADMIN_PASSWORD_HASH } = window.ASTRA_CONFIG;
 
+// ▼ここから追加：カテゴリを選んだ時に「本文（要約）」欄へ自動で入る定型文 ============
+// 「生放送」はあえて含めていない(生放送だけは、管理人が毎回手でしっかり書く運用にしたため)。
+// ここに無いカテゴリ(生放送・なし)を選んだ場合は、自動入力は行われない。
+const CATEGORY_SUMMARY_TEMPLATES = {
+  character:   '新キャラクターの情報が公開されました。詳細は以下をご確認ください。',
+  version:     '新バージョンの情報が公開されました。アップデート内容の詳細は以下をご確認ください。',
+  code:        '新しい交換コードが配布されました。有効期限にご注意のうえ、お早めにお使いください。',
+  event:       '新しいイベントの情報が公開されました。開催期間・詳細は以下をご確認ください。',
+  maintenance: 'メンテナンスのお知らせです。対象時間・詳細は以下をご確認ください。',
+  gacha:       '新しいガチャ（ピックアップ）情報が公開されました。開催期間・詳細は以下をご確認ください。',
+};
+// ▲ここまで追加 ============================================
+
 const TYPES = {
+
   news: {
     label: 'ニュース',
     fields: [
@@ -414,6 +436,12 @@ async function renderTabContent(){
           <div id="gachaItemsList"></div>
           <button type="button" class="add-item-btn" id="addGachaItemBtn">＋ ピックアップを追加</button>
         </div>
+        <div class="field full code-only" id="codeItemsField">
+          <label>コード一覧（カテゴリ「コード」の場合のみ）</label>
+          <p class="hint" style="margin:-4px 0 8px;">「自動入力URL」は、ゲーム側が対応している場合だけ入力してください（未対応のゲームは空欄のままでOKです。記事側では「自動入力」ボタンが出なくなるだけで、コード自体は今まで通り表示されます）。</p>
+          <div id="codeItemsList"></div>
+          <button type="button" class="add-item-btn" id="addCodeItemBtn">＋ コードを追加</button>
+        </div>
       ` : ''}</div>
       <div style="display:flex; gap:8px;">
         <button class="submit-btn" id="submitBtn">${isEditing ? '保存する' : '登録する'}</button>
@@ -593,6 +621,27 @@ async function renderTabContent(){
     }
     window.addGachaItemRow = addGachaItemRow; // ボタンのクリックハンドラから呼び出せるようにする
 
+    // ▼ここから追加：コード一覧(コード名・報酬・自動入力URL[任意])の入力欄 ============
+    // 1行=1つのコード。「＋」ボタンで自由に行を増やし、「✕」で削除できる。
+    // 自動入力URLは、対応していないゲームでは空欄のままでよい(記事側で自動的にボタンが省略される)。
+    function addCodeItemRow(item){
+      item = item || { code:'', reward:'', url:'' };
+      const list = document.getElementById('codeItemsList');
+      const row = document.createElement('div');
+      row.className = 'code-item-row';
+      const esc = (s) => String(s || '').replace(/"/g, '&quot;');
+      row.innerHTML = `
+        <input type="text" class="code-code" placeholder="コード（例：ASTRALHUB2026）" value="${esc(item.code)}">
+        <input type="text" class="code-reward" placeholder="報酬（例：原石×100、モラ×50000）" value="${esc(item.reward)}">
+        <input type="text" class="code-url-input" placeholder="自動入力URL（対応ゲームのみ・任意）" value="${esc(item.url)}">
+        <button type="button" class="remove-item-btn">✕</button>
+      `;
+      row.querySelector('.remove-item-btn').addEventListener('click', () => row.remove());
+      list.appendChild(row);
+    }
+    window.addCodeItemRow = addCodeItemRow;
+    // ▲ここまで追加 ============================================
+
     // カテゴリが「ガチャ」の時だけ、ガチャ専用の入力欄(開始・終了日時、ピックアップ一覧)を表示する
     function updateGachaFieldsVisibility(){
       const catEl = document.querySelector('#formGrid [data-field="cat"]');
@@ -601,19 +650,55 @@ async function renderTabContent(){
         el.style.display = isGacha ? 'block' : 'none';
       });
     }
+    // カテゴリが「コード」の時だけ、コード専用の入力欄(コード一覧)を表示する
+    function updateCodeFieldsVisibility(){
+      const catEl = document.querySelector('#formGrid [data-field="cat"]');
+      const isCode = catEl && catEl.value === 'code';
+      document.querySelectorAll('.code-only').forEach(el => {
+        el.style.display = isCode ? 'block' : 'none';
+      });
+    }
     const catSelectEl = document.querySelector('#formGrid [data-field="cat"]');
-    if (catSelectEl) catSelectEl.addEventListener('change', updateGachaFieldsVisibility);
+    if (catSelectEl) {
+      catSelectEl.addEventListener('change', updateGachaFieldsVisibility);
+      catSelectEl.addEventListener('change', updateCodeFieldsVisibility);
+    }
+
+    // ▼ここから追加：カテゴリを選んだ時、本文（要約）欄に定型文を自動で入れる ============
+    // ・要約欄が「空」または「別カテゴリの定型文のまま(まだ手を加えていない)」の場合だけ書き換える
+    //   → すでに手入力で書いた内容を、うっかり消してしまわないようにするため
+    // ・「生放送」を選んだ場合は何もしない(生放送は毎回手で書く運用のため)
+    const summaryFieldEl = document.querySelector('#formGrid [data-field="summary"]');
+    if (catSelectEl && summaryFieldEl) {
+      const knownTemplates = new Set(Object.values(CATEGORY_SUMMARY_TEMPLATES));
+      catSelectEl.addEventListener('change', () => {
+        const template = CATEGORY_SUMMARY_TEMPLATES[catSelectEl.value];
+        const current = summaryFieldEl.value.trim();
+        if (template && (current === '' || knownTemplates.has(current))) {
+          summaryFieldEl.value = template;
+        }
+      });
+    }
+    // ▲ここまで追加 ============================================
 
     document.getElementById('addGachaItemBtn').addEventListener('click', () => addGachaItemRow());
+    document.getElementById('addCodeItemBtn').addEventListener('click', () => addCodeItemRow());
 
-    // 編集モードで、既存のピックアップ一覧があれば行を復元する
+    // 編集モードで、既存のピックアップ一覧・コード一覧があれば行を復元する
     if (isEditing && editingItem.gachaItems) {
       try {
         const savedItems = JSON.parse(editingItem.gachaItems);
         if (Array.isArray(savedItems)) savedItems.forEach(addGachaItemRow);
       } catch (e) { /* 壊れたデータは無視する */ }
     }
+    if (isEditing && editingItem.codeItems) {
+      try {
+        const savedCodeItems = JSON.parse(editingItem.codeItems);
+        if (Array.isArray(savedCodeItems)) savedCodeItems.forEach(addCodeItemRow);
+      } catch (e) { /* 壊れたデータは無視する */ }
+    }
     updateGachaFieldsVisibility();
+    updateCodeFieldsVisibility();
   }
   // ▲ここまで追加 ============================================
 
@@ -644,6 +729,13 @@ async function renderTabContent(){
         type: row.querySelector('.gacha-type').value.trim(),
         highlight: row.querySelector('.gacha-highlight').checked,
       })).filter(it => it.name);
+
+      // コード一覧を、コードが入力されている行だけ集めてformValuesに追加する
+      formValues.codeItems = Array.from(document.querySelectorAll('#codeItemsList .code-item-row')).map(row => ({
+        code: row.querySelector('.code-code').value.trim(),
+        reward: row.querySelector('.code-reward').value.trim(),
+        url: row.querySelector('.code-url-input').value.trim(),
+      })).filter(it => it.code);
     }
 
     if (activeType === 'manualChannels') {
@@ -724,12 +816,14 @@ async function renderTabContent(){
       const idx = Number(btn.dataset.publishIdx);
       const target = items[idx];
       if (!target) return;
-      // gachaItemsはデータベースからはJSON文字列のまま届くため、
-      // 配列に戻してから送らないと、公開時にピックアップ一覧が消えてしまう
+      // gachaItems・codeItemsはデータベースからはJSON文字列のまま届くため、
+      // 配列に戻してから送らないと、公開時にピックアップ一覧・コード一覧が消えてしまう
       let gachaItems = [];
       try { gachaItems = JSON.parse(target.gachaItems || '[]'); } catch (e) { /* 空のまま */ }
+      let codeItems = [];
+      try { codeItems = JSON.parse(target.codeItems || '[]'); } catch (e) { /* 空のまま */ }
       try {
-        await apiSaveNews({ ...target, gachaItems, status: 'published' });
+        await apiSaveNews({ ...target, gachaItems, codeItems, status: 'published' });
         showToast('公開しました');
         renderTabContent();
       } catch (e) {

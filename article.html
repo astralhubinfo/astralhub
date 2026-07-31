@@ -114,6 +114,24 @@
     margin: 0 0 14px; padding-left: 10px; border-left: 4px solid var(--accent);
   }
 
+  /* コード一覧の表 */
+  .code-items-block { margin: 0 0 22px; }
+  .code-items-table { width:100%; border-collapse: collapse; font-size: 13px; }
+  .code-items-table th, .code-items-table td { text-align:left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .code-items-table th { color: var(--text-faint); font-weight:500; font-size: 12px; }
+  .code-copy-btn {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text);
+    background: var(--surface-strong); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 5px 10px; cursor: pointer;
+  }
+  .code-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .code-copy-btn.copied { border-color: #1fae7a; color: #1fae7a; }
+  .code-redeem-btn {
+    display: inline-block; font-size: 12.5px; font-weight: 500; color: var(--accent);
+    padding: 5px 10px; border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  }
+  .code-redeem-btn:hover { background: var(--accent); color: #fff; }
+
   .not-found { text-align:center; padding: 60px 20px; color: var(--text-faint); }
   .not-found a { color: var(--accent); font-weight:500; }
 
@@ -161,7 +179,7 @@
 <script src="assets/site-data.js"></script>
 <script>
 const { CATEGORY_LABEL } = window.ASTRA_CONFIG;
-const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, affiliateArticleLinkHtml } = window.ASTRA_DATA;
+const { gameById, timeAgoLabel, findNewsById, loadingHtml, refreshNewsData, gachaPeriodHtml, gachaItemsTableHtml, codeItemsTableHtml, affiliateArticleLinkHtml } = window.ASTRA_DATA;
 
 const params = new URLSearchParams(window.location.search);
 const id = params.get('id');
@@ -202,6 +220,7 @@ pageEl.innerHTML = loadingHtml();
       <span class="article-time">${timeAgoLabel(item.publishedAt)}・${new Date(item.publishedAt).toLocaleString('ja-JP')}</span>
       ${item.cat === 'gacha' ? gachaPeriodHtml(item) : ''}
       ${item.cat === 'gacha' ? gachaItemsTableHtml(item.gachaItems) : ''}
+      ${item.cat === 'code' ? codeItemsTableHtml(item.codeItems) : ''}
       ${item.summary ? `<p class="article-body">${item.summary}</p>` : ''}
       ${affiliateArticleLinkHtml()}
       <div class="source-block">
@@ -210,6 +229,30 @@ pageEl.innerHTML = loadingHtml();
       </div>
     </div>
   `;
+
+  // 「コード」欄のコピー ボタン:押すとコードをクリップボードにコピーし、一時的に「コピー済み」の見た目にする
+  pageEl.querySelectorAll('.code-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const code = btn.dataset.code || '';
+      try {
+        await navigator.clipboard.writeText(code);
+      } catch (e) {
+        // クリップボードAPIが使えない環境向けの保険(古いブラウザなど)
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      const original = btn.textContent;
+      btn.textContent = 'コピーしました';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1500);
+    });
+  });
 
   // X投稿の埋め込みウィジェットを読み込む（元URLが登録されている場合のみ）
   if (item.url) {

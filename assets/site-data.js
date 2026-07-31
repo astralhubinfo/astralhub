@@ -333,13 +333,14 @@
     return String(str).includes('T') ? str : String(str).replace(' ', 'T') + 'Z';
   }
 
-  // ガチャのピックアップ一覧(JSON文字列)を、配列に変換する。壊れている場合は空配列を返す。
+  // ガチャのピックアップ一覧・コード一覧(JSON文字列)を、配列に変換する。壊れている場合は空配列を返す。
   function parseGachaItems(json){
     try {
       const arr = JSON.parse(json || '[]');
       return Array.isArray(arr) ? arr : [];
     } catch (e) { return []; }
   }
+  const parseCodeItems = parseGachaItems; // 中身は同じ処理のため共用する
 
   // データベースの「news」の行を、ニュースカードがそのまま読める形に変換する
   // 【重要】publishedAtは、サーバー側(src/index.js)のSQLで "published_at AS publishedAt" と
@@ -358,6 +359,7 @@
       gachaStart: normalizeDate(row.gachaStart),
       gachaEnd: normalizeDate(row.gachaEnd),
       gachaItems: parseGachaItems(row.gachaItems),
+      codeItems: parseCodeItems(row.codeItems),
     };
   }
 
@@ -449,6 +451,32 @@
         : '';
       return `<div class="gacha-banner-group">${heading}${block('キャラクター', characters, '属性')}${block('武器', weapons, '武器種')}</div>`;
     }).join('');
+  }
+
+  // コード一覧を表(テーブル)のHTMLに変換する(記事詳細ページで使う)。
+  // コードは「コード名」をタップ/クリックするとコピーできるようにし、
+  // 自動入力URL(item.url)が入力されている行だけ、専用のボタンを表示する。
+  // ※自動入力に対応していないゲームでは、admin.html側でURL欄を空欄のまま登録すればよい。
+  function codeItemsTableHtml(items){
+    if (!Array.isArray(items) || items.length === 0) return '';
+    const esc = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rowsHtml = items.map(it => {
+      const codeEsc = esc(it.code).replace(/'/g, '&#39;');
+      const redeemBtn = it.url
+        ? `<a class="code-redeem-btn" href="${it.url}" target="_blank" rel="noopener noreferrer">自動入力 ↗</a>`
+        : '';
+      return `<tr>
+        <td><button type="button" class="code-copy-btn" data-code="${codeEsc}">${esc(it.code)}</button></td>
+        <td>${esc(it.reward)}</td>
+        <td>${redeemBtn || '－'}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="code-items-block">
+      <table class="code-items-table">
+        <thead><tr><th>コード</th><th>報酬</th><th></th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
   }
   // ▲ここまで追加 ============================================
 
@@ -618,7 +646,7 @@
     gameById, timeAgoLabel, thumbStyle, emptyHtml, loadingHtml, shortNameFor, gameIconTextHtml,
     liveCardHtml, videoCardHtml, newsItemHtml, sortNewsForDisplay, sortLiveForDisplay,
     getFilteredData, findNewsById, isEligibleForPopular,
-    gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel,
+    gachaCountdownInfo, gachaPeriodHtml, gachaItemsTableHtml, formatDateTimeLabel, codeItemsTableHtml,
     refreshYouTubeData, refreshNewsData,
     refreshScheduleData, getScheduleData, scheduleCountdownInfo, scheduleAnnounceHtml, scheduleCardHtml,
     affiliateTopCardHtml, affiliateArticleLinkHtml, affiliateIntroLinkHtml,
