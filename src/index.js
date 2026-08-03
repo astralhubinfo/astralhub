@@ -1249,6 +1249,7 @@ async function upsertOfficialLiveStatus(video, channelId, gameId, env) {
 // 公式チャンネルを直接見回り、通知の取りこぼしがないか確認する(1時間ごとのCronから呼び出す)
 async function patrolOfficialChannelsFallback(env) {
   const channelIds = [...OFFICIAL_CHANNEL_IDS];
+  console.log(`[AstralHub][保険チェック] 開始 対象チャンネル数=${channelIds.length}`);
 
   // ①各チャンネルの最新動画IDを、安いAPI(playlistItems)で集める(1チャンネル=1ユニット)
   const videoIdToChannel = {};
@@ -1261,10 +1262,16 @@ async function patrolOfficialChannelsFallback(env) {
   }
 
   const allVideoIds = Object.keys(videoIdToChannel);
-  if (allVideoIds.length === 0) return;
+  if (allVideoIds.length === 0) {
+    console.log("[AstralHub][保険チェック] 終了 動画が1件も取得できませんでした(APIキー等を確認してください)");
+    return;
+  }
 
   // ②集めた動画IDをまとめて状態確認する(何件あってもまとめて1ユニット、50件超は自動で分割)
   const videoMap = await fetchVideosBatched(allVideoIds, env);
+
+  let liveCount = 0;
+  let upcomingCount = 0;
 
   for (const videoId of allVideoIds) {
     const video = videoMap[videoId];
@@ -1278,12 +1285,16 @@ async function patrolOfficialChannelsFallback(env) {
       if (!gameId) gameId = await lookupChannelGame(channelId, env);
       if (gameId) {
         await upsertOfficialLiveStatus(video, channelId, gameId, env);
+        liveCount++;
       }
     } else if (status === "upcoming") {
       // 配信予定:通知の取りこぼしで official_schedule(予告表示)に反映されていないケースを拾う
       await saveOfficialSchedule(video, channelId, env);
+      upcomingCount++;
     }
   }
+
+  console.log(`[AstralHub][保険チェック] 終了 チェックした動画数=${allVideoIds.length} 配信中=${liveCount}件 配信予定=${upcomingCount}件`);
 }
 // ▲ここまで追加 ============================================
 
