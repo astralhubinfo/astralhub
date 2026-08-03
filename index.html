@@ -168,6 +168,10 @@
     max-width: 1240px; margin: 0 auto; padding: 20px;
     display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start;
   }
+  /* gridの子要素(main)は、指定が無いと「中身の最大幅」まで縮まなくなる仕様のため、
+     min-width:0を指定しておく。これが無いと、公式配信予告など横スクロールする欄が
+     ある時に、その欄の中で収まらずページ全体が横に伸びてしまう不具合が起きる。 */
+  .page > main { min-width: 0; }
   @media (max-width: 900px) {
     .page { grid-template-columns: 1fr; padding: 14px 14px 88px; }
     .sidebar { display: none; }
