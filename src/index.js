@@ -147,6 +147,68 @@ export default {
       }
     }
 
+    // 窓口4.6:登録チャンネルの整合性チェック＋名前の食い違いを自動修正する(POST /api/channels/verify-and-fix)
+    // ※上の窓口4.5と同じチェックを行うが、「名前の食い違い(name_mismatch)」については
+    //   YouTube側の正しい名前を取得できている以上、その場でデータベースの名前を書き換えてしまう。
+    //   「チャンネルIDそのものが見つからない(not_found)」は、正しい名前を取得しようがなく
+    //   自動では直せないため、これまで通り一覧として返し、管理画面側で確認・削除してもらう。
+    if (url.pathname === "/api/channels/verify-and-fix" && request.method === "POST") {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT channel_id, channel_name, game FROM channels"
+        ).all();
+
+        if (results.length === 0) {
+          return jsonResponse({ checked: 0, fixed: [], problems: [] });
+        }
+
+        const channelIds = results.map(r => r.channel_id);
+        const channelDetails = await fetchChannelDetailsBatched(channelIds, env);
+        const detailsMap = new Map(channelDetails.map(ch => [ch.id, ch]));
+
+        const fixed = [];
+        const problems = [];
+
+        for (const row of results) {
+          const ch = detailsMap.get(row.channel_id);
+
+          if (!ch) {
+            // YouTube側に見つからない(IDが間違っている・削除された・非公開になった等) → 自動修正の対象外
+            problems.push({
+              channel_id: row.channel_id,
+              game: row.game,
+              savedName: row.channel_name,
+              actualName: null,
+              reason: "not_found",
+            });
+            continue;
+          }
+
+          const actualName = (ch.snippet && ch.snippet.title) || "";
+          // 登録時に名前が空だったものは比較のしようがないため、対象外にする
+          if (row.channel_name && actualName && row.channel_name !== actualName) {
+            // YouTube側の正しい名前に書き換える(チャンネルIDはそのまま・名前だけの修正)
+            await env.DB.prepare(
+              "UPDATE channels SET channel_name = ? WHERE channel_id = ?"
+            )
+              .bind(actualName, row.channel_id)
+              .run();
+
+            fixed.push({
+              channel_id: row.channel_id,
+              game: row.game,
+              oldName: row.channel_name,
+              newName: actualName,
+            });
+          }
+        }
+
+        return jsonResponse({ checked: results.length, fixed, problems });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // ===== 2.5 ニュース記事の受付窓口(API) =====
     // ※以前はブラウザのlocalStorageだけに保存していましたが、それだと管理人本人以外には
     //   一切表示されなかったため、チャンネル・動画・配信と同じくデータベース(D1)に保存する形にしました。
@@ -435,6 +497,10 @@ export default {
       // 1日4回(日本時間:朝8時・昼13時・夜21時・深夜2時):
       // 「今ライブ配信中」のものだけをゲームごとに見回り検索し、未登録チャンネルを発掘する
       ctx.waitUntil(runLiveDiscoveryPatrol(env));
+    } else if (controller.cron === "0 * * * *") {
+      // 1時間ごと:YouTubeからの自動通知(WebSub)が万が一届かなかった場合の保険として、
+      // 公式チャンネルを直接見回りチェックする(安いAPIのみ使用)
+      ctx.waitUntil(patrolOfficialChannelsFallback(env));
     }
   },
 };
@@ -602,6 +668,17 @@ async function handleWebSubVerify(request, env) {
     .first();
   if (!channelRow) {
     console.error("[AstralHub][WebSub] 登録されていないチャンネルからの確認リクエストです", channelId);
+
+    // ▼ここから追加:購読の解除がYouTube側にうまく伝わっていない可能性があるため、
+    // 　念のためもう一度「解除」をリクエストしておく(=同じログが繰り返し出るのを防ぐ)。
+    // 　※「解除」の確認リクエスト(mode==="unsubscribe")に対しては送り直さない
+    // 　  (解除→確認→解除→…と無限にリクエストし合うのを防ぐため)
+    if (mode === "subscribe") {
+      await requestWebSubUnsubscribe(channelId, env).catch(() => {});
+      console.log(`[AstralHub][WebSub] 未登録チャンネルのため、解除リクエストを送り直しました channelId=${channelId}`);
+    }
+    // ▲ここまで追加 ============================================
+
     return new Response("Not Found", { status: 404 });
   }
 
@@ -1124,6 +1201,91 @@ async function fetchVideosBatched(videoIds, env) {
   }
   return videoMap;
 }
+
+// ============================================================
+// ▼ここから追加:公式チャンネルの見回りチェック(保険機能) ============================================
+// 役割:通常はYouTubeからの自動通知(WebSub)を待って「配信中」「配信予定」を検知しているが、
+//       まれに通知が届かないことがある(購読期限切れ・配送失敗など)ため、その保険として
+//       1時間ごとに公式チャンネルを直接チェックする。
+//       検索(search)は使わず、安いAPI(playlistItems・videos)だけを使うため消費量はごくわずか。
+// ============================================================
+
+// チャンネルIDから「そのチャンネルの全アップロード動画」の再生リストIDを作る
+// (YouTubeの仕様:チャンネルIDの先頭"UC"を"UU"に置き換えるだけで求められる、追加のAPI呼び出し不要の方法)
+function uploadsPlaylistIdFromChannelId(channelId) {
+  return channelId.replace(/^UC/, "UU");
+}
+
+// 再生リストから、最新の動画ID(配信予定・配信中を含む)を数件取得する(1回の呼び出しで1ユニット)
+async function fetchLatestVideoIdsFromPlaylist(playlistId, env, maxResults = 5) {
+  const apiUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${maxResults}&playlistId=${playlistId}&key=${env.YOUTUBE_API_KEY}`;
+  const res = await fetch(apiUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || [])
+    .map(item => item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId)
+    .filter(Boolean);
+}
+
+// LIVE中の動画をlive_statusに保存する(fetchAndStoreVideo内のLIVE保存処理と同じ内容)
+async function upsertOfficialLiveStatus(video, channelId, gameId, env) {
+  const snippet = video.snippet || {};
+  const liveDetails = video.liveStreamingDetails || {};
+  const thumbnails = snippet.thumbnails || {};
+  const thumbnail = (thumbnails.medium || thumbnails.high || thumbnails.default || {}).url || "";
+
+  await env.DB.prepare(
+    `INSERT INTO live_status (channel_id, is_live, live_video_id, title, thumbnail_url, viewer_count, game, updated_at)
+     VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(channel_id) DO UPDATE SET
+       is_live=1, live_video_id=excluded.live_video_id, title=excluded.title,
+       thumbnail_url=excluded.thumbnail_url, viewer_count=excluded.viewer_count,
+       game=excluded.game, updated_at=datetime('now')`
+  )
+    .bind(channelId, video.id, snippet.title || "", thumbnail, Number(liveDetails.concurrentViewers) || 0, gameId)
+    .run();
+}
+
+// 公式チャンネルを直接見回り、通知の取りこぼしがないか確認する(1時間ごとのCronから呼び出す)
+async function patrolOfficialChannelsFallback(env) {
+  const channelIds = [...OFFICIAL_CHANNEL_IDS];
+
+  // ①各チャンネルの最新動画IDを、安いAPI(playlistItems)で集める(1チャンネル=1ユニット)
+  const videoIdToChannel = {};
+  for (const channelId of channelIds) {
+    const playlistId = uploadsPlaylistIdFromChannelId(channelId);
+    const videoIds = await fetchLatestVideoIdsFromPlaylist(playlistId, env).catch(() => []);
+    for (const videoId of videoIds) {
+      videoIdToChannel[videoId] = channelId;
+    }
+  }
+
+  const allVideoIds = Object.keys(videoIdToChannel);
+  if (allVideoIds.length === 0) return;
+
+  // ②集めた動画IDをまとめて状態確認する(何件あってもまとめて1ユニット、50件超は自動で分割)
+  const videoMap = await fetchVideosBatched(allVideoIds, env);
+
+  for (const videoId of allVideoIds) {
+    const video = videoMap[videoId];
+    if (!video || !video.snippet) continue;
+    const channelId = videoIdToChannel[videoId];
+    const status = video.snippet.liveBroadcastContent;
+
+    if (status === "live") {
+      // 配信中:通知の取りこぼしで live_status に反映されていないケースを拾う
+      let gameId = classifyGameIdForItem(video.snippet.title || "");
+      if (!gameId) gameId = await lookupChannelGame(channelId, env);
+      if (gameId) {
+        await upsertOfficialLiveStatus(video, channelId, gameId, env);
+      }
+    } else if (status === "upcoming") {
+      // 配信予定:通知の取りこぼしで official_schedule(予告表示)に反映されていないケースを拾う
+      await saveOfficialSchedule(video, channelId, env);
+    }
+  }
+}
+// ▲ここまで追加 ============================================
 
 // ============================================================
 // ▼ここから追加:チャンネル登録直後の初回取り込み処理 ============================================

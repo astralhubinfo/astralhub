@@ -308,9 +308,10 @@ async function apiSaveChannel(item){
   return res.json();
 }
 
-// 登録済みチャンネルの整合性をチェックする（名前の食い違い・チャンネルIDの取り違えなどを探す）
-async function apiVerifyChannels(){
-  const res = await fetch('/api/channels/verify');
+// 登録済みチャンネルの整合性をチェックし、名前の食い違いはその場で自動修正する
+// （チャンネルIDそのものが見つからないものだけ、修正しようがないため一覧で返ってくる）
+async function apiVerifyAndFixChannels(){
+  const res = await fetch('/api/channels/verify-and-fix', { method: 'POST' });
   if (!res.ok) throw new Error('チェックに失敗しました');
   return res.json();
 }
@@ -486,8 +487,8 @@ async function renderTabContent(){
     <div class="panel">
       <h2>チェック結果</h2>
       ${channelProblems.length === 0
-        ? '<p class="hint">問題は見つかりませんでした。登録されているチャンネルは、すべて正しく認識されています。</p>'
-        : `<p class="hint">以下のチャンネルは、登録内容とYouTube側の情報が食い違っています。内容を確認し、必要であれば削除して登録し直してください。</p>
+        ? '<p class="hint">問題は見つかりませんでした。登録されているチャンネルは、すべて正しく認識されています（名前の食い違いがあった場合は自動修正済みです）。</p>'
+        : `<p class="hint">以下のチャンネルは、YouTube側でIDそのものが見つからず、自動修正できませんでした。内容を確認し、必要であれば削除して登録し直してください。</p>
            <div class="discover-list">
              ${channelProblems.map(p => {
                const g = gameById(p.game);
@@ -528,7 +529,7 @@ async function renderTabContent(){
               <option value="game" ${sortModeByType[activeType] === 'game' ? 'selected' : ''}>ゲームごとに並び替え</option>
             </select>
           ` : ''}
-          ${activeType === 'manualChannels' ? `<button class="submit-btn" id="verifyChannelsBtn" style="padding:8px 14px;">チャンネルをチェックする</button>` : ''}
+          ${activeType === 'manualChannels' ? `<button class="submit-btn" id="verifyChannelsBtn" style="padding:8px 14px;">チェック＆名前を自動修正する</button>` : ''}
         </div>
       </div>
       <div class="table-wrap">
@@ -554,18 +555,29 @@ async function renderTabContent(){
     });
   }
 
-  // ▼「チャンネルをチェックする」ボタンの操作
+  // ▼「チェック＆名前を自動修正する」ボタンの操作
   const verifyChannelsBtn = document.getElementById('verifyChannelsBtn');
   if (verifyChannelsBtn) {
     verifyChannelsBtn.addEventListener('click', async () => {
       verifyChannelsBtn.disabled = true;
       verifyChannelsBtn.textContent = 'チェック中…';
       try {
-        const data = await apiVerifyChannels();
+        const data = await apiVerifyAndFixChannels();
         channelProblems = data.problems || [];
-        showToast(channelProblems.length === 0
-          ? `チェック完了：${data.checked}件とも問題ありませんでした`
-          : `チェック完了：${data.checked}件中、${channelProblems.length}件で問題が見つかりました`);
+        const fixedCount = (data.fixed || []).length;
+
+        const messages = [];
+        if (fixedCount > 0) {
+          const names = data.fixed.map(f => `「${f.oldName}」→「${f.newName}」`).join('、');
+          messages.push(`${fixedCount}件の名前を自動修正しました（${names}）`);
+        }
+        if (channelProblems.length > 0) {
+          messages.push(`${channelProblems.length}件はチャンネルID自体が見つからず、自動修正できませんでした（内容を確認のうえ削除してください）`);
+        }
+        if (messages.length === 0) {
+          messages.push(`チェック完了：${data.checked}件とも問題ありませんでした`);
+        }
+        showToast(messages.join(' / '));
       } catch (e) {
         showToast(e.message || 'チェックに失敗しました');
       } finally {
