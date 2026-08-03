@@ -1011,6 +1011,11 @@ function resolveVideoAction(video, channelId) {
 // ============================================================
 
 // ①通知の申し込み期限が近い(24時間以内)チャンネルを、自動で更新する
+// ※ここで対象になるのは websub_subscriptions テーブルの記録だが、そのチャンネルが
+// 　すでに channels(管理リスト)から削除されている場合、更新(subscribe)を送っても
+// 　YouTube側で失敗するだけで、古い記録が残り続けて5分おきに同じ処理を繰り返してしまう。
+// 　そのため、更新の前に「今も管理リストに存在するか」を確認し、
+// 　存在しなければ更新せず、古い記録ごと削除して掃除する。
 async function renewExpiringSubscriptions(env) {
   const soon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const { results } = await env.DB.prepare(
@@ -1020,6 +1025,21 @@ async function renewExpiringSubscriptions(env) {
     .all();
 
   for (const row of results) {
+    const channelRow = await env.DB.prepare(
+      "SELECT channel_id FROM channels WHERE channel_id = ?"
+    )
+      .bind(row.channel_id)
+      .first();
+
+    if (!channelRow) {
+      // すでに削除済みのチャンネル → 更新せず、古い購読記録を掃除する
+      await env.DB.prepare("DELETE FROM websub_subscriptions WHERE channel_id = ?")
+        .bind(row.channel_id)
+        .run();
+      console.log(`[AstralHub][WebSub] 管理リストにないチャンネルの古い購読記録を削除しました channelId=${row.channel_id}`);
+      continue;
+    }
+
     await requestWebSubSubscribe(row.channel_id, env).catch(() => {});
   }
 }

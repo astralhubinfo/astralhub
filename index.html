@@ -462,14 +462,13 @@
     margin: 0;
   }
 
-  /* ---------- 公式チャンネルの配信予定(ヘッダー直下のお知らせ欄・まもなく配信カード) ---------- */
+  /* ---------- 公式チャンネルの配信予定(LIVE配信セクション直下のお知らせ欄) ---------- */
   .schedule-announce-wrap {
-    max-width: 1240px; margin: 0 auto; padding: 0 20px;
     display: flex; gap: 10px; overflow-x: auto;
+    margin: -6px 0 20px;
     scrollbar-width: none; /* Firefox：横スクロールバーを隠す */
   }
   .schedule-announce-wrap::-webkit-scrollbar { display: none; } /* Chrome等：横スクロールバーを隠す */
-  .schedule-announce-wrap:not(:empty) { padding-top: 10px; padding-bottom: 4px; }
   .schedule-announce-item {
     display: flex; align-items: center; gap: 8px; flex-shrink: 0;
     border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -556,8 +555,6 @@
     <div class="filter-bar" id="filterBar"></div>
   </div>
 </header>
-
-<div class="schedule-announce-wrap" id="scheduleAnnounceWrap"></div>
 
 <div class="page">
   <main id="mainContent"></main>
@@ -777,6 +774,12 @@ function liveSectionHtml(list, scheduleList, loading){
     ? (imminentSchedule.map(scheduleCardHtml).join('') + visibleLive.map(liveCardHtml).join(''))
     : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'));
 
+  // ヘッダー直下にあった予告欄を、LIVE配信セクションのすぐ下に表示するよう変更。
+  // 予定が1件も無い時は、欄自体を出さずに場所を取らないようにする。
+  const announceHtml = (scheduleList && scheduleList.length)
+    ? `<div class="schedule-announce-wrap">${scheduleList.map(scheduleAnnounceHtml).join('')}</div>`
+    : '';
+
   return `<div class="panel" id="live-section">
     <div class="panel-head">
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
@@ -784,7 +787,8 @@ function liveSectionHtml(list, scheduleList, loading){
     </div>
     ${updateNoteHtml('live')}
     <div class="card-grid">${gridInner}</div>
-  </div>`;
+  </div>
+  ${announceHtml}`;
 }
 
 // 「人気動画」の期間タブ（24時間／7日間／30日間）用：
@@ -895,14 +899,6 @@ function renderSidebar(){
     : (newsLoaded ? emptyHtml() : loadingHtml());
 }
 
-// ヘッダー直下のお知らせ欄:公式チャンネルの配信予定を、開始時刻が近い順に横に並べて表示する。
-// 予定が1件も無い時は、欄自体を空にして場所を取らないようにする。
-function renderScheduleAnnounce(){
-  const wrap = document.getElementById('scheduleAnnounceWrap');
-  const schedule = getScheduleData();
-  wrap.innerHTML = schedule.length ? schedule.map(scheduleAnnounceHtml).join('') : '';
-}
-
 function renderMobileMain(){
   if (window.innerWidth <= 900 && mobileTab === 'news') {
     const { news, newsLoaded } = getFilteredData(activeGames);
@@ -917,7 +913,6 @@ function renderMobileMain(){
 
 function renderAll(){
   renderFilterBar();
-  renderScheduleAnnounce();
   const handledByMobile = renderMobileMain();
   if (!handledByMobile) renderMainContent();
   renderSidebar();
