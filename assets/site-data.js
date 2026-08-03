@@ -525,14 +525,15 @@
     };
   }
 
-  // ヘッダー付近のお知らせ欄に出す、1件分のHTML(index.htmlで横に並べて使う想定)
+  // 「公式配信予告」セクションに出す、1件分のHTML(index.htmlで2列グリッドに並べて使う想定)
   function scheduleAnnounceHtml(item){
     const g = gameById(item.game);
     const info = scheduleCountdownInfo(item);
     if (!g || !info) return '';
     return `<a class="schedule-announce-item" href="${item.url}" target="_blank" rel="noopener noreferrer">
-      <span class="game-icon-text icon-sm" style="background:${g.color}" title="${g.name}">${shortNameFor(g)}</span>
-      <span class="schedule-announce-text">${SCHEDULE_CLOCK_ICON_SVG} ${info.dateTimeLabel}〜 ${g.name}公式で配信予定</span>
+      <span class="schedule-announce-badge" style="background:${g.color}">${shortNameFor(g)}</span>
+      <span class="schedule-announce-time">${SCHEDULE_CLOCK_ICON_SVG} ${info.dateTimeLabel}〜</span>
+      <span class="schedule-announce-note">公式で配信予定</span>
     </a>`;
   }
 
