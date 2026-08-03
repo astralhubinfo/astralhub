@@ -462,10 +462,9 @@
     margin: 0;
   }
 
-  /* ---------- 公式チャンネルの配信予定(LIVE配信セクション直下のお知らせ欄) ---------- */
+  /* ---------- 公式チャンネルの配信予定(独立セクション「公式配信予告」) ---------- */
   .schedule-announce-wrap {
     display: flex; gap: 10px; overflow-x: auto;
-    margin: -6px 0 20px;
     scrollbar-width: none; /* Firefox：横スクロールバーを隠す */
   }
   .schedule-announce-wrap::-webkit-scrollbar { display: none; } /* Chrome等：横スクロールバーを隠す */
@@ -774,12 +773,6 @@ function liveSectionHtml(list, scheduleList, loading){
     ? (imminentSchedule.map(scheduleCardHtml).join('') + visibleLive.map(liveCardHtml).join(''))
     : (loading ? loadingHtml() : emptyHtml('現在、配信中の対象アカウントはありません'));
 
-  // ヘッダー直下にあった予告欄を、LIVE配信セクションのすぐ下に表示するよう変更。
-  // 予定が1件も無い時は、欄自体を出さずに場所を取らないようにする。
-  const announceHtml = (scheduleList && scheduleList.length)
-    ? `<div class="schedule-announce-wrap">${scheduleList.map(scheduleAnnounceHtml).join('')}</div>`
-    : '';
-
   return `<div class="panel" id="live-section">
     <div class="panel-head">
       <span class="panel-title"><span class="live-dot"></span>LIVE配信</span>
@@ -787,8 +780,19 @@ function liveSectionHtml(list, scheduleList, loading){
     </div>
     ${updateNoteHtml('live')}
     <div class="card-grid">${gridInner}</div>
-  </div>
-  ${announceHtml}`;
+  </div>`;
+}
+
+// 公式チャンネルの配信予告を、独立したセクションとして表示する(LIVE配信セクションの直前に固定表示)。
+// 予定が1件も無い時は、セクション自体を出さずに場所を取らないようにする。
+function officialAnnounceSectionHtml(scheduleList){
+  if (!scheduleList || !scheduleList.length) return '';
+  return `<div class="panel" id="official-announce-section">
+    <div class="panel-head">
+      <span class="panel-title">公式配信予告</span>
+    </div>
+    <div class="schedule-announce-wrap">${scheduleList.map(scheduleAnnounceHtml).join('')}</div>
+  </div>`;
 }
 
 // 「人気動画」の期間タブ（24時間／7日間／30日間）用：
@@ -879,9 +883,9 @@ function renderMainContent(){
     latest: latestSectionHtml(generalVideos, loading),
   };
 
-  // イントロ文の直後・LIVE配信セクションの直前にPRリンクを表示し、
-  // 表示順(sectionOrderArr)がどう並び替えられても、おすすめカードは一番最後に固定表示する
-  el.innerHTML = SITE_INTRO_HTML + affiliateIntroLinkHtml() + sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
+  // イントロ文の直後・LIVE配信セクションの直前に、PRリンクと公式配信予告セクションを表示する。
+  // 表示順(sectionOrderArr)がどう並び替えられても、この2つ(と最後のおすすめカード)は位置を固定する。
+  el.innerHTML = SITE_INTRO_HTML + affiliateIntroLinkHtml() + officialAnnounceSectionHtml(getScheduleData()) + sectionOrderArr.map(key => blocks[key]).join('') + affiliateTopCardHtml();
 
   document.querySelectorAll('.pill-tab[data-range]').forEach(btn => {
     btn.addEventListener('click', () => { popularRange = btn.dataset.range; renderMainContent(); });
